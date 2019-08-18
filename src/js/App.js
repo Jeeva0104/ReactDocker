@@ -1,6 +1,6 @@
 import React from 'react';
+import MainRouter from 'js/clientRoutes/MainRouter';
 
-
-const App = () => (<div>helow world</div>)
+const App = () => (<MainRouter/>)
 
 export default App;
