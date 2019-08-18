@@ -61,8 +61,14 @@ class Example extends Component {
     this.setState({ activeIndex: newIndex });
   }
 
+
   render() {
     const { activeIndex } = this.state;
+
+    const divStyle = {
+      width: "100%",
+      textAlign: "center"
+    };
 
     const slides = items.map((item) => {
       return (
@@ -71,9 +77,11 @@ class Example extends Component {
           onExited={this.onExited}
           key={item.src}
         >
-          <img src={item.src} alt={item.altText} width="80%" height="500px"/>
+          <div style={divStyle}>
+            <img src={item.src} alt={item.altText} width="80%" height="500px" />
+          </div>
           <CarouselCaption captionText={item.caption} captionHeader={item.caption} />
-        </CarouselItem>
+        </CarouselItem >
       );
     });
 
