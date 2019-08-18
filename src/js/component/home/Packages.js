@@ -8,7 +8,9 @@ class Packages extends React.Component {
     constructor(props) {
         super(props);
         this.state = {
-            collapse: {}
+            collapse: {
+                '1': false
+            }
         };
         this.toggleCard = this.toggleCard.bind(this);
     }
@@ -74,7 +76,6 @@ class Packages extends React.Component {
                         </Collapse>
                     </Col>
                 </Row>
-                <br />
                 <Row>
                     <Col sm="6">
                         <Collapse isOpen={this.state.collapse['3']}>

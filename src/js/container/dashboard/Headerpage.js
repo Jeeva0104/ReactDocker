@@ -17,7 +17,6 @@ export default class HeaderPage extends Component {
                 <CarouselComponent />
                 <hr />
                 <Packages />
-                <hr />
                 <Contacts />
             </div>
         )

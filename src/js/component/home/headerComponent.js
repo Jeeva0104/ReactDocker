@@ -19,7 +19,7 @@ export default class HeaderComponent extends Component {
     super(props);
 
     this.toggle = this.toggle.bind(this);
-    this.goToGalleryPage=this.goToGalleryPage.bind(this)
+    this.goToGalleryPage = this.goToGalleryPage.bind(this)
     this.state = {
       isOpen: false
     };
@@ -29,14 +29,14 @@ export default class HeaderComponent extends Component {
       isOpen: !this.state.isOpen
     });
   }
-  goToGalleryPage(){
+  goToGalleryPage() {
     this.props.history.push('/gallery')
   }
 
   render() {
-    
+
     return (
-      <div>
+      <div className='navbar_container'>
         <Navbar color="light" light expand="md">
           <NavbarBrand href="/">Hotel BlueBerry</NavbarBrand>
           <NavbarToggler onClick={this.toggle} />

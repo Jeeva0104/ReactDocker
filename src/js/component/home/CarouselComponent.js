@@ -78,7 +78,7 @@ class Example extends Component {
           key={item.src}
         >
           <div style={divStyle}>
-            <img src={item.src} alt={item.altText} width="80%" height="500px" />
+            <img src={item.src} alt={item.altText} className='carouselImage' />
           </div>
           <CarouselCaption captionText={item.caption} captionHeader={item.caption} />
         </CarouselItem >
