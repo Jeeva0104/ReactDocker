@@ -4,7 +4,7 @@ export default class Gallery extends React.Component{
     render(){
         return (
             <div>
-                Gallery Page
+                under consider construction
             </div>
         )
     }
