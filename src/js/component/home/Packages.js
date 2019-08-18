@@ -8,9 +8,7 @@ class Packages extends React.Component {
     constructor(props) {
         super(props);
         this.state = {
-            collapse: {
-                '1': false
-            }
+            collapse: {}
         };
         this.toggleCard = this.toggleCard.bind(this);
     }
