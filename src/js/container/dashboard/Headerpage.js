@@ -4,19 +4,21 @@ import HeaderComponent from '../../component/home/headerComponent';
 import CarouselComponent from '../../component/home/CarouselComponent';
 import Packages from '../../component/home/Packages';
 import Contacts from '../../component/home/contact'
+import './../../../css/styles.css';
+
 export default class HeaderPage extends Component {
     render() {
         return (
             <div>
-                <HeaderComponent 
-                {...this.props}
+                <HeaderComponent
+                    {...this.props}
                 />
-                <hr/>
-                <CarouselComponent/>
-                <hr/>
-                <Packages/>
-                <hr/>
-                <Contacts/>
+                <hr />
+                <CarouselComponent />
+                <hr />
+                <Packages />
+                <hr />
+                <Contacts />
             </div>
         )
     }
