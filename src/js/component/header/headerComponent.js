@@ -19,6 +19,7 @@ export default class HeaderComponent extends Component {
     super(props);
 
     this.toggle = this.toggle.bind(this);
+    this.goToGalleryPage=this.goToGalleryPage.bind(this)
     this.state = {
       isOpen: false
     };
@@ -28,8 +29,12 @@ export default class HeaderComponent extends Component {
       isOpen: !this.state.isOpen
     });
   }
+  goToGalleryPage(){
+    this.props.history.push('/gallery')
+  }
 
   render() {
+    
     return (
       <div>
         <Navbar color="light" light expand="md">
@@ -43,23 +48,9 @@ export default class HeaderComponent extends Component {
               <NavItem>
                 <NavLink href="https://github.com/reactstrap/reactstrap">Contact Us</NavLink>
               </NavItem>
-              <UncontrolledDropdown nav inNavbar>
-                <DropdownToggle nav caret>
-                  Options
-                </DropdownToggle>
-                <DropdownMenu right>
-                  <DropdownItem>
-                    Option 1
-                  </DropdownItem>
-                  <DropdownItem>
-                    Option 2
-                  </DropdownItem>
-                  <DropdownItem divider />
-                  <DropdownItem>
-                    Reset
-                  </DropdownItem>
-                </DropdownMenu>
-              </UncontrolledDropdown>
+              <NavItem>
+                <NavLink onClick={this.goToGalleryPage}>Gallery</NavLink>
+              </NavItem>
             </Nav>
           </Collapse>
         </Navbar>

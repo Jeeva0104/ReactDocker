@@ -7,7 +7,9 @@ export default class HeaderPage extends Component {
     render() {
         return (
             <div>
-                <HeaderComponent />
+                <HeaderComponent 
+                {...this.props}
+                />
                 <hr/>
                 <CarouselComponent/>
                 <hr/>
