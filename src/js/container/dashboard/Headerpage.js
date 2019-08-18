@@ -1,8 +1,9 @@
 import React, { Component } from "react";
 import DashBoardNav from './DashboardNav'
-import HeaderComponent from '../../component/header/headerComponent';
-import CarouselComponent from '../../component/header/CarouselComponent';
-import Packages from '../../component/header/Packages'
+import HeaderComponent from '../../component/home/headerComponent';
+import CarouselComponent from '../../component/home/CarouselComponent';
+import Packages from '../../component/home/Packages';
+import Contacts from '../../component/home/contact'
 export default class HeaderPage extends Component {
     render() {
         return (
@@ -14,6 +15,8 @@ export default class HeaderPage extends Component {
                 <CarouselComponent/>
                 <hr/>
                 <Packages/>
+                <hr/>
+                <Contacts/>
             </div>
         )
     }
