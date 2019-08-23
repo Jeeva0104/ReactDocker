@@ -51,7 +51,7 @@ class Packages extends React.Component {
                     </Col>
                     <Col sm="6">
                         <Collapse isOpen={this.state.collapse['2']}>
-                            <Card>
+                            <Card className={`open_card`}>
                                 <CardBody>
                                     {expandData2()}
                                 </CardBody>
@@ -77,7 +77,7 @@ class Packages extends React.Component {
                 <Row>
                     <Col sm="6">
                         <Collapse isOpen={this.state.collapse['3']}>
-                            <Card>
+                            <Card className={`open_card`}>
                                 <CardBody>
                                     {expandData3()}
                                 </CardBody>
@@ -101,7 +101,7 @@ class Packages extends React.Component {
                     </Col>
                     <Col sm="6">
                         <Collapse isOpen={this.state.collapse['4']}>
-                            <Card>
+                            <Card className={`open_card`}>
                                 <CardBody>
                                     {expandData4()}
                                 </CardBody>
