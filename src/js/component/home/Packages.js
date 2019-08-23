@@ -27,7 +27,7 @@ class Packages extends React.Component {
                 <Row>
                     <Col sm="6">
                         <Collapse isOpen={this.state.collapse['1']}>
-                            <Card>
+                            <Card className={`open_card`}>
                                 <CardBody>
                                     {expandData1()}
                                 </CardBody>

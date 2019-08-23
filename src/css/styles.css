@@ -1,10 +1,23 @@
 .navbar_container {
-    background-color:#6b757d;
+    background-color:#232f3e;
+    min-height: 75px;
 }
 
+.navbar_container > nav {
+   padding-top: 15px;
+}
+
+.navbar_container > nav > a {
+    color: #dddddd;
+ }
+
 .carouselImage {
-    width: 90%;
+    width: 100%;
     height: 500px; 
+}
+
+.navbar-collapse {
+    color: #dddddd;
 }
 
 .carousel-control-prev-icon, .carousel-control-next-icon {
@@ -22,9 +35,9 @@
 }
 
 .contacts_container {
-    background-color:#6b757d;
+    background-color:#232f3e;
     min-height: 150px;
-    color: white;
+    color: #dddddd;
 }
 
 .contacts_wrapper {
@@ -37,7 +50,19 @@
 }
 
 .card-body {
-    min-height: 240px
+    min-height: 240px;
+    border-color: #232f3e;
+    background-color: #fafafa;
+}
+
+.card-body:hover {
+    border: 0px solid;
+    box-shadow: 5px 10px 8px #232f3e;
+}
+
+.open_card {
+    border: 1px solid;
+    box-shadow: 5px 10px 8px #232f3e;
 }
 
 .package_wrapper > h5 , .card-title{
@@ -72,9 +97,14 @@
     font-size: 15px;
 }
 
+.card > .btn {
+    background-color:#232f3e;
+    color: #dddddd;
+}
+
 @media only screen and (max-width: 768px) {
     .carouselImage {
-        width: 95%;
+        width: 100%;
         height: 300px; 
     }
     .packages-list > .row {
@@ -84,5 +114,12 @@
     }
     .packages-list > .row > .col-sm-6 {
         margin-bottom: 30px;
+    }
+    .navbar-toggler-icon {
+        color: #dddddd;
+        background-color: #dddddd;
+    }
+    .packages-list > .row:first-child {
+        margin-top: 30px;
     }
 }

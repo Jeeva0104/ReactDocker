@@ -36,7 +36,7 @@ export default class HeaderComponent extends Component {
   render() {
     return (
       <div className='navbar_container'>
-        <Navbar color="light" light expand="md">
+        <Navbar color="#232f3e" expand="md">
           <NavbarBrand href="javascript:void(0)">Hotel BlueBerry</NavbarBrand>
           <NavbarToggler onClick={this.toggle} />
           <Collapse isOpen={this.state.isOpen} navbar>
