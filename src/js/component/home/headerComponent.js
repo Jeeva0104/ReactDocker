@@ -34,19 +34,18 @@ export default class HeaderComponent extends Component {
   }
 
   render() {
-
     return (
       <div className='navbar_container'>
         <Navbar color="light" light expand="md">
-          <NavbarBrand href="/">Hotel BlueBerry</NavbarBrand>
+          <NavbarBrand href="javascript:void(0)">Hotel BlueBerry</NavbarBrand>
           <NavbarToggler onClick={this.toggle} />
           <Collapse isOpen={this.state.isOpen} navbar>
             <Nav className="ml-auto" navbar>
               <NavItem>
-                <NavLink href="/components/">Packages</NavLink>
+                <NavLink onClick={this.props.scrollToPackage}>Packages</NavLink>
               </NavItem>
               <NavItem>
-                <NavLink href="https://github.com/reactstrap/reactstrap">Contact Us</NavLink>
+                <NavLink onClick={this.props.scrollTocontact}>Contact Us</NavLink>
               </NavItem>
               <NavItem>
                 <NavLink onClick={this.goToGalleryPage}>Gallery</NavLink>

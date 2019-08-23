@@ -23,7 +23,7 @@ class Packages extends React.Component {
     }
     render() {
         return (
-            <div className={'packages-list'}>
+            <div className={'packages-list'} ref={this.props.packageRef}>
                 <Row>
                     <Col sm="6">
                         <Collapse isOpen={this.state.collapse['1']}>
