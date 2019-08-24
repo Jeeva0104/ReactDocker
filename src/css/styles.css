@@ -1,27 +1,80 @@
-.navbar_container {
-    background-color:#232f3e;
-    min-height: 75px;
-}
-
-.navbar_container > nav {
-   padding-top: 15px;
-}
-
-.navbar_container > nav > a {
+/*  Top Nav CSS   */
+body {
+    margin: 0;
+    font-family: Arial, Helvetica, sans-serif;
+  }
+  
+  .topnav_contact {
+    font-size: 12px;
+    min-height: 25px;
+    background-color: #232f3e;
     color: #dddddd;
- }
+  }
 
+  .topnav_contact > span > i{
+      margin: 2px 5px 0px 0px;
+  }
+
+  .topnav_contact > .email{
+    float: right;
+    margin: 2px 100px;
+  }
+
+  .topnav_contact > .mobile{
+    float: left;
+    margin: 2px 100px;
+    }
+
+  .topnav {
+    overflow: hidden;
+    background-color: #c0c5ce;
+  }
+  
+  .topnav a {
+    float: right;
+    display: block;
+    color: #232f3e;
+    text-align: center;
+    padding: 14px 16px;
+    text-decoration: none;
+    font-size: 17px;
+  }
+
+  .topnav a:first-child {
+      float: left;
+      font-size: 1.2em;
+      font-weight: bold;
+  }
+  
+  .topnav a:hover {
+    border-bottom: 3px solid;
+    border-color: #232f3e;
+    color: white;
+  }
+  
+  .topnav a:first-child:hover {
+    border-bottom: 0px;
+    color: #232f3e;
+ } 
+
+  .topnav .icon {
+    display: none;
+  }
+  /* Carousel Image custom css */
 .carouselImage {
     width: 100%;
     height: 500px; 
 }
 
-.navbar-collapse {
-    color: #dddddd;
+.carousel-control-prev, .carousel-control-next {
+    width: 7%;
 }
 
 .carousel-control-prev-icon, .carousel-control-next-icon {
     background-color: #e5e5e5;
+    min-width: 30px;
+    min-height: 30px;
+    border-radius: 18px;
 }
 
 .carousel-control-prev:hover, .carousel-control-next:hover {
@@ -102,11 +155,56 @@
     color: #dddddd;
 }
 
-@media only screen and (max-width: 768px) {
+
+@media screen and (max-width: 600px) {
+    /*  Top Nav CSS   */
+    .topnav_contact {
+        font-size: 12px;
+        min-height: 35px;
+    }
+    .topnav_contact > .email{
+        float: right;
+        margin: 5px 5px;
+    }
+    .topnav_contact > .mobile{
+        float: left;
+        margin: 5px 5px;
+    }
+
+    .topnav a:not(:first-child) {display: none;}
+    .topnav a.icon {
+      float: right;
+      display: block;
+      color: #232f3e;
+        text-align: center;
+        padding: 14px 16px;
+        text-decoration: none;
+        font-size: 17px;
+    }
+    .topnav.responsive {position: relative;}
+    .topnav.responsive .icon {
+      position: absolute;
+      right: 0;
+      top: 0;
+    }
+    .topnav.responsive a {
+      float: none;
+      display: block;
+      text-align: left;
+    }
+
+    /* Carousel Image custom css */
     .carouselImage {
         width: 100%;
         height: 300px; 
     }
+    .carousel-control-prev, .carousel-control-next {
+        width: 15%;
+    }
+
+
+
+
     .packages-list > .row {
         margin-left: 0px;
         margin-right: 0px;
@@ -115,11 +213,7 @@
     .packages-list > .row > .col-sm-6 {
         margin-bottom: 30px;
     }
-    .navbar-toggler-icon {
-        color: #dddddd;
-        background-color: #dddddd;
-    }
     .packages-list > .row:first-child {
         margin-top: 30px;
     }
-}
+  }
