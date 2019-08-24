@@ -1,14 +1,80 @@
-.navbar_container {
-    background-color:#6b757d;
+/*  Top Nav CSS   */
+body {
+    margin: 0;
+    font-family: Arial, Helvetica, sans-serif;
+  }
+  
+  .topnav_contact {
+    font-size: 12px;
+    min-height: 25px;
+    background-color: #232f3e;
+    color: #dddddd;
+  }
+
+  .topnav_contact > span > i{
+      margin: 2px 5px 0px 0px;
+  }
+
+  .topnav_contact > .email{
+    float: right;
+    margin: 2px 100px;
+  }
+
+  .topnav_contact > .mobile{
+    float: left;
+    margin: 2px 100px;
+    }
+
+  .topnav {
+    overflow: hidden;
+    background-color: #c0c5ce;
+  }
+  
+  .topnav a {
+    float: right;
+    display: block;
+    color: #232f3e;
+    text-align: center;
+    padding: 14px 16px;
+    text-decoration: none;
+    font-size: 17px;
+  }
+
+  .topnav a:first-child {
+      float: left;
+      font-size: 1.2em;
+      font-weight: bold;
+  }
+  
+  .topnav a:hover {
+    border-bottom: 3px solid;
+    border-color: #232f3e;
+    color: white;
+  }
+  
+  .topnav a:first-child:hover {
+    border-bottom: 0px;
+    color: #232f3e;
+ } 
+
+  .topnav .icon {
+    display: none;
+  }
+  /* Carousel Image custom css */
+.carouselImage {
+    width: 100%;
+    height: 500px; 
 }
 
-.carouselImage {
-    width: 90%;
-    height: 500px; 
+.carousel-control-prev, .carousel-control-next {
+    width: 7%;
 }
 
 .carousel-control-prev-icon, .carousel-control-next-icon {
     background-color: #e5e5e5;
+    min-width: 30px;
+    min-height: 30px;
+    border-radius: 18px;
 }
 
 .carousel-control-prev:hover, .carousel-control-next:hover {
@@ -22,9 +88,9 @@
 }
 
 .contacts_container {
-    background-color:#6b757d;
+    background-color:#232f3e;
     min-height: 150px;
-    color: white;
+    color: #dddddd;
 }
 
 .contacts_wrapper {
@@ -37,7 +103,19 @@
 }
 
 .card-body {
-    min-height: 240px
+    min-height: 240px;
+    border-color: #232f3e;
+    background-color: #fafafa;
+}
+
+.card-body:hover {
+    border: 0px solid;
+    box-shadow: 5px 10px 8px #232f3e;
+}
+
+.open_card {
+    border: 1px solid;
+    box-shadow: 5px 10px 8px #232f3e;
 }
 
 .package_wrapper > h5 , .card-title{
@@ -72,11 +150,61 @@
     font-size: 15px;
 }
 
-@media only screen and (max-width: 768px) {
+.card > .btn {
+    background-color:#232f3e;
+    color: #dddddd;
+}
+
+
+@media screen and (max-width: 600px) {
+    /*  Top Nav CSS   */
+    .topnav_contact {
+        font-size: 12px;
+        min-height: 35px;
+    }
+    .topnav_contact > .email{
+        float: right;
+        margin: 5px 5px;
+    }
+    .topnav_contact > .mobile{
+        float: left;
+        margin: 5px 5px;
+    }
+
+    .topnav a:not(:first-child) {display: none;}
+    .topnav a.icon {
+      float: right;
+      display: block;
+      color: #232f3e;
+        text-align: center;
+        padding: 14px 16px;
+        text-decoration: none;
+        font-size: 17px;
+    }
+    .topnav.responsive {position: relative;}
+    .topnav.responsive .icon {
+      position: absolute;
+      right: 0;
+      top: 0;
+    }
+    .topnav.responsive a {
+      float: none;
+      display: block;
+      text-align: left;
+    }
+
+    /* Carousel Image custom css */
     .carouselImage {
-        width: 95%;
+        width: 100%;
         height: 300px; 
     }
+    .carousel-control-prev, .carousel-control-next {
+        width: 15%;
+    }
+
+
+
+
     .packages-list > .row {
         margin-left: 0px;
         margin-right: 0px;
@@ -85,4 +213,7 @@
     .packages-list > .row > .col-sm-6 {
         margin-bottom: 30px;
     }
-}
+    .packages-list > .row:first-child {
+        margin-top: 30px;
+    }
+  }
