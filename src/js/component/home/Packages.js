@@ -24,6 +24,7 @@ class Packages extends React.Component {
     render() {
         return (
             <div className={'packages-list'} ref={this.props.packageRef}>
+                <h1 className='lined_heading'><span>Packages</span></h1>
                 <Row>
                     <Col sm="6">
                         <Collapse isOpen={this.state.collapse['1']}>
