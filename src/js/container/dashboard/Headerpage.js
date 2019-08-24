@@ -29,9 +29,10 @@ export default class HeaderPage extends Component {
                     {...{ ...this.props, scrollToPackage, scrollTocontact }}
                 />
                 <Route path='/gallery' component={Gallery} />
-                <Route  exact path='/' component={CarouselComponent}/>
-                <Route  exact path='/' render={()=><Packages {...{ packageRef }} />}/>
-                <Route  exact path='/' render={()=><Contacts {...{ contactRef }} />}/>
+                <Route exact path='/' component={CarouselComponent} />
+                <Route exact path='/' render={() => <Packages {...{ packageRef }} />} />
+                <Route exact path='/' render={() => <Contacts {...{ contactRef }} />} />
+                <Route exact path='/gallery' render={() => <Contacts {...{ contactRef }} />} />
                 {/* <Redirect exact to='/dashboard' /> */}
             </div>
         )
