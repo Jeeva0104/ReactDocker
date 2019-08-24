@@ -3,7 +3,7 @@ import { Card, Button, CardTitle, CardText, Row, Col, Collapse, CardBody } from 
 export default class Gallery extends React.Component {
     render() {
         return (
-            <div style={{ padding: '30px' }}>
+            <div className={"gallery_container"} style={{ padding: '30px' }}>
                 <h1 className='lined_heading'><span>Gallery</span></h1>
                 <Row>
                     <Col sm="3 p-1" >

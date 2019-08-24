@@ -37,7 +37,7 @@ class Packages extends React.Component {
                         </Collapse>
                         <Collapse isOpen={!this.state.collapse['1']}>
                             <Card body>
-                                <CardTitle>3 Nights/4 days(BANGALORE-OOTY–MYSORE-BANGALORE)</CardTitle>
+                                <CardTitle>3 Nights/4 Days(BANGALORE-OOTY–MYSORE-BANGALORE)</CardTitle>
                                 <CardText>
                                     <ul>
                                         <li>DAY 1: Bangalore-OOTY</li>

@@ -1,4 +1,5 @@
 /*  Top Nav CSS   */
+
 body {
     margin: 0;
     font-family: Arial, Helvetica, sans-serif;
@@ -173,12 +174,40 @@ body {
 }
 
 .contacts_wrapper {
-    margin: 40px;
     padding-top: 25px;
 }
 
 .email_us {
     display: block;
+}
+
+.contacts_container > .row {
+    padding: 30px;
+    text-align: center;
+}
+
+.contacts_container > .row > .col-sm-6 > .contact_heading{
+    display: block;
+    margin-bottom: 10px;
+}
+
+.contacts_container > .row > .col-sm-6 {
+    margin-top: 10px;
+}
+
+.contacts_container > .row > .col-sm-6 > .contact_content{
+    display: block;
+    font-size: 13px;
+}
+
+/* Gallery CSS*/
+
+.gallery_container img {
+    border: 1px solid #232f3e;
+}
+
+.gallery_container img:hover {
+    box-shadow: 5px 10px 8px #232f3e;
 }
 
 @media screen and (max-width: 600px) {
@@ -243,4 +272,20 @@ body {
     .packages-list > .row:first-child {
         margin-top: 30px;
     }
+
+    /* Contact us CSS*/
+    .contacts_container > .row {
+        width: 100%;
+        padding: 0px;
+    }
+    .contacts_container > .row > .col-sm-6 {
+        margin-top: 0px;
+        margin-bottom: 10px;
+    }
+
+    .contacts_container > .row > .col-sm-6 > .contact_heading{
+        display: block;
+        margin: 10px 0px;
+    }
+
   }

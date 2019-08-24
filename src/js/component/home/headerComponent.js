@@ -34,15 +34,15 @@ export default class HeaderComponent extends Component {
     return (
       <div>
         <div className="topnav_contact">
-          <span className="mobile"><i class="fa fa-phone" aria-hidden="true"></i>+91 9942233381</span>
-          <span className="email"><i class="fa fa-envelope" aria-hidden="true"></i>suganth2610@gmail.com</span>
+          <span className="mobile"><i class="fa fa-phone" aria-hidden="true"></i>+91 9886657171</span>
+          <span className="email"><i class="fa fa-envelope" aria-hidden="true"></i>hotelblueberry.ooty@gmail.com</span>
         </div>
         <div className={`topnav ${this.state.isOpen ? 'responsive' : ''}`} id="myTopnav">
           <a href="/" >Hotel BlueBerry</a>
-          <a href="javascript:void(0);" hidden={this.props.location.pathname =='/gallery'} onClick={this.goToGalleryPage}>Gallery</a>
-          <a href="javascript:void(0);" hidden={this.props.location.pathname =='/gallery'} onClick={this.scrollTocontact}>Contact Us</a>
-          <a href="javascript:void(0);" hidden={this.props.location.pathname =='/gallery'} onClick={this.scrollToPackage}>Packages</a>
-          <a href="javascript:void(0);" hidden={this.props.location.pathname =='/gallery'} className="icon" onClick={this.toggle}>
+          <a href="javascript:void(0);" hidden={this.props.location.pathname == '/gallery'} onClick={this.goToGalleryPage}>Gallery</a>
+          <a href="javascript:void(0);" hidden={this.props.location.pathname == '/gallery'} onClick={this.scrollTocontact}>Contact Us</a>
+          <a href="javascript:void(0);" hidden={this.props.location.pathname == '/gallery'} onClick={this.scrollToPackage}>Packages</a>
+          <a href="javascript:void(0);" hidden={this.props.location.pathname == '/gallery'} className="icon" onClick={this.toggle}>
             <i className="fa fa-bars"></i>
           </a>
         </div>

@@ -3,7 +3,7 @@ import React from 'react';
 function expandData2() {
     return (
         <div className="package_wrapper">
-            <h5>2NIGHT-3DAYS OOTY-COONOOR</h5>
+            <h5>2 Nights/3 Days(OOTY-COONOOR)</h5>
             <h6>Day 1: OOTY-COONOOR</h6>
             <span>
                 Today pickup from ooty bus stand and check into the hotel after refreshment today visit Botanical Garden,

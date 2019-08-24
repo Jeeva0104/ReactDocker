@@ -3,23 +3,23 @@ import React from 'react';
 function expandData1() {
     return (
         <div className="package_wrapper">
-            <h5>3 Nights/4 days(BANGALORE-OOTY –MYSORE-BANGALORE)</h5>
-            <h6>DAY 1-Bangalore-OOTY</h6>
+            <h5>3 Nights/4 Days(BANGALORE-OOTY –MYSORE-BANGALORE)</h5>
+            <h6>Day 1: Bangalore-OOTY</h6>
             <span>
                 Today pickup from bangalore aiport and proceed to Ooty on the way visit Bandipur and Madumalai forest.
                 And then visit Pyakara dam, Pyakara water falls,6th mile,shooting point,kamarajar sagar
                 dam,pyne forest and by evening Check in at the hotel as you arrive in Ooty.
                 Overnight stay at Ooty.
             </span>
-            <h6>DAY 2-Ooty-Coonoor</h6>
+            <h6>Day 2: Ooty-Coonoor</h6>
             <span>
                 Today visit famous Botanical garden built in 1847 ,Coonoor- Toytrain,simspark,Madras regimental center,Ketti Valley view,
                  Evening free for shopping and other activities and overnight stay at Ooty.
             </span>
-            <h6>DAY 3-Ooty-Mysore</h6>
+            <h6>Day 3: Ooty-Mysore</h6>
             <span>Today visit Ooty Lake,Thread garden and proceed to mysore and and visit the world famous
                 Brindavan Gardens expanded over 150 acres,Overnight stay in mysore.</span>
-            <h6>DAY 4-Mysore-Bangalore</h6>
+            <h6>Day 4: Mysore-Bangalore</h6>
             <span>Today visit mysore palace and proceed to Bangalore and drop to Bangalore for onward journey.</span>
             <h6>Includes</h6>
             <ul>
