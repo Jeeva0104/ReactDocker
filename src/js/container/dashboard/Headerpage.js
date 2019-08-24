@@ -3,7 +3,10 @@ import DashBoardNav from './DashboardNav'
 import HeaderComponent from '../../component/home/headerComponent';
 import CarouselComponent from '../../component/home/CarouselComponent';
 import Packages from '../../component/home/Packages';
-import Contacts from '../../component/home/contact'
+import Contacts from '../../component/home/contact';
+// import React from 'react';
+import { Switch, Route, Redirect } from 'react-router-dom';
+import Gallery from 'js/component/home/gallery'
 import './../../../css/styles.css';
 
 export default class HeaderPage extends Component {
@@ -25,9 +28,11 @@ export default class HeaderPage extends Component {
                 <HeaderComponent
                     {...{ ...this.props, scrollToPackage, scrollTocontact }}
                 />
-                <CarouselComponent />
-                <Packages {...{ packageRef }} />
-                <Contacts {...{ contactRef }} />
+                <Route path='/gallery' component={Gallery} />
+                <Route  exact path='/' component={CarouselComponent}/>
+                <Route  exact path='/' render={()=><Packages {...{ packageRef }} />}/>
+                <Route  exact path='/' render={()=><Contacts {...{ contactRef }} />}/>
+                {/* <Redirect exact to='/dashboard' /> */}
             </div>
         )
     }

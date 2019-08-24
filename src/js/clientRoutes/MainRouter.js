@@ -5,9 +5,9 @@ import Gallery from 'js/component/home/gallery'
 function MainRouter() {
     return (
         <Switch>
-            <Route path='/dashboard' component={Header} />
-            <Route path='/gallery' component={Gallery} />
-            <Redirect to='/dashboard' />
+            <Route path='/' component={Header} />
+            {/* <Route path='/gallery' component={Gallery} /> */}
+            {/* <Redirect to='/dashboard/gallery' /> */}
         </Switch>
     )
 }
