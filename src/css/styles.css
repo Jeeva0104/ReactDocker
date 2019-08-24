@@ -45,6 +45,8 @@ body {
       float: left;
       font-size: 1.2em;
       font-weight: bold;
+      font-style: italic;
+      font-family: Chalkduster, fantasy;
   }
   
   .topnav a:hover {
