@@ -30,6 +30,7 @@ export default class HeaderComponent extends Component {
   }
 
   render() {
+
     return (
       <div>
         <div className="topnav_contact">
@@ -37,11 +38,11 @@ export default class HeaderComponent extends Component {
           <span className="email"><i class="fa fa-envelope" aria-hidden="true"></i>suganth2610@gmail.com</span>
         </div>
         <div className={`topnav ${this.state.isOpen ? 'responsive' : ''}`} id="myTopnav">
-          <a href="javascript:void(0)">Hotel BlueBerry</a>
-          <a href="javascript:void(0);" onClick={this.goToGalleryPage}>Gallery</a>
-          <a href="javascript:void(0);" onClick={this.scrollTocontact}>Contact Us</a>
-          <a href="javascript:void(0);" onClick={this.scrollToPackage}>Packages</a>
-          <a href="javascript:void(0);" className="icon" onClick={this.toggle}>
+          <a href="/" >Hotel BlueBerry</a>
+          <a href="javascript:void(0);" hidden={this.props.location.pathname =='/gallery'} onClick={this.goToGalleryPage}>Gallery</a>
+          <a href="javascript:void(0);" hidden={this.props.location.pathname =='/gallery'} onClick={this.scrollTocontact}>Contact Us</a>
+          <a href="javascript:void(0);" hidden={this.props.location.pathname =='/gallery'} onClick={this.scrollToPackage}>Packages</a>
+          <a href="javascript:void(0);" hidden={this.props.location.pathname =='/gallery'} className="icon" onClick={this.toggle}>
             <i className="fa fa-bars"></i>
           </a>
         </div>
