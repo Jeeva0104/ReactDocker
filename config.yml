@@ -1,0 +1,1939 @@
+version: 2.1
+
+parameters:
+  run_build_workflow:
+    type: boolean
+    default: true
+  run_deploy_to_dev_workflow:
+    type: boolean
+    default: false
+  run_deploy_to_staging_workflow:
+    type: boolean
+    default: false
+  run_deploy_to_prod_workflow:
+    type: boolean
+    default: false
+
+applitools_defaults: &applitools_defaults
+  command: |
+    export APPLITOOLS_BATCH_ID=`echo $CIRCLE_SHA1`
+    export APPLITOOLS_API_KEY=${APPLITOOLS_API_KEY}
+    export APPLITOOLS_PARENT_BRANCH_NAME=master
+    echo "export APPLITOOLS_BATCH_ID=${APPLITOOLS_BATCH_ID}" >> $BASH_ENV
+    echo "export APPLITOOLS_API_KEY=${APPLITOOLS_API_KEY}" >> $BASH_ENV
+newskit_api_defaults: &newskit_api_defaults
+  command: |
+    echo "export NEWSKIT_API_X_API_KEY=$NEWSKIT_API_X_API_KEY" >> $BASH_ENV
+    echo "export NEWSKIT_API_ENV_URL=$NEWSKIT_API_ENV_URL" >> $BASH_ENV
+    echo "export MAIN_GRAPHQL_URL=$MAIN_GRAPHQL_URL" >> $BASH_ENV
+    echo "export MAIN_AUDIENCE=$MAIN_AUDIENCE" >> $BASH_ENV
+    echo "export MAIN_OAUTH_TOKEN=$MAIN_OAUTH_TOKEN" >> $BASH_ENV
+    echo "export MAIN_CLIENT_ID=$MAIN_CLIENT_ID" >> $BASH_ENV
+    echo "export MAIN_CLIENT_SECRET=$MAIN_CLIENT_SECRET" >> $BASH_ENV
+    echo "export STRIPE_KEY=$STRIPE_KEY" >> $BASH_ENV
+    echo "export SAILTHRU_API_SECRET=$SAILTHRU_API_SECRET" >> $BASH_ENV
+    echo "export SAILTHRU_DOMAIN=$SAILTHRU_DOMAIN" >> $BASH_ENV
+orbs:
+  slack: circleci/slack@3.4.2
+  browser-tools: circleci/browser-tools@1.3.0
+  release-api: nukengprod/release-api@0.4.12
+
+executors:
+  helm:
+    docker:
+      - image: nukengprodservice/helm:0.1.102
+        auth:
+          username: ${DOCKER_USERNAME}
+          password: ${DOCKER_PASSWORD}
+    resource_class: xlarge
+
+  node:
+    docker:
+      - image: cimg/node:16.13.0-browsers
+        auth:
+          username: ${DOCKER_USERNAME}
+          password: ${DOCKER_PASSWORD}
+    resource_class: xlarge
+
+  terraform:
+    docker:
+      - image: hashicorp/terraform:0.14.2
+        auth:
+          username: ${DOCKER_USERNAME}
+          password: ${DOCKER_PASSWORD}
+    resource_class: xlarge
+
+  pact:
+    docker:
+      - image: pactfoundation/pact-cli
+
+commands:
+  # Lerna Specific
+  should_run:
+    parameters:
+      package:
+        type: string
+      scope:
+        type: string
+        default: "@newskit-render"
+    steps:
+      - run:
+          name: Stop the job if package << parameters.package >> not changed
+          command: |
+            export CHANGED=`grep "<< parameters.scope >>/<< parameters.package >>$" -c -s changed.tmp`
+            if [ "$CHANGED" = "0" ]; then
+              echo "No changes in << parameters.package >>. Skipping."
+              circleci-agent step halt
+            fi
+  should_run_multi:
+    parameters:
+      package_list:
+        type: string
+      scope:
+        type: string
+        default: "@newskit-render"
+    steps:
+      - run:
+          name: check for changes in packages
+          command: |
+            RUN="no"
+            for i in <<parameters.package_list>>; do
+              export PACKAGED_CHANGED=`grep "<< parameters.scope >>/$i" -c -s changed.tmp`
+              if [ "$PACKAGED_CHANGED" != "0" ]; then
+                echo "$i has changes"
+                RUN="yes"
+              fi
+            done
+            if [ "$RUN" = "no" ]; then
+              echo "No changes in: << parameters.package_list >>"
+              circleci-agent step halt
+            fi
+  # General - should be in core
+  aws_assume_role:
+    description: Assume AWS role
+    parameters:
+      aws_access_key_id:
+        description: AWS Access Key Id
+        type: string
+        default: "${AWS_ACCESS_KEY_ID}"
+      aws_secret_key:
+        description: AWS Secret Key
+        type: string
+        default: "${AWS_SECRET_ACCESS_KEY}"
+      aws_assume_role_arn:
+        description: AWS ARN For Assume Role
+        type: string
+        default: "${AWS_ASSUME_ROLE_ARN}"
+      aws_region:
+        description: AWS region
+        type: string
+        default: "eu-west-1"
+      job_type:
+        description: The job type to be used
+        type: string
+        default: "default"
+      eks_cluster:
+        description: EKS cluster for kubeconfig
+        type: string
+        default: "${AWS_EKS_CLUSTER}"
+      update_kubeconfig:
+        description: Whether to create a kubeconfig
+        type: boolean
+        default: false
+    steps:
+      - run:
+          name: Assume AWS role
+          command: |
+            export AWS_ACCESS_KEY_ID=<< parameters.aws_access_key_id >>
+            export AWS_SECRET_ACCESS_KEY=<< parameters.aws_secret_key >>
+            export temp_role=$(aws sts assume-role \
+                    --role-arn "<< parameters.aws_assume_role_arn >>" \
+                    --role-session-name "circle-ci-assume")
+            export AWS_ACCESS_KEY_ID_TEMP=$(echo $temp_role | jq .Credentials.AccessKeyId | xargs)
+            export AWS_SECRET_ACCESS_KEY_TEMP=$(echo $temp_role | jq .Credentials.SecretAccessKey | xargs)
+            export AWS_SESSION_TOKEN_TEMP=$(echo $temp_role | jq .Credentials.SessionToken | xargs)
+            echo "export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID_TEMP" >> $BASH_ENV
+            echo "export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY_TEMP" >> $BASH_ENV
+            echo "export AWS_SESSION_TOKEN=$AWS_SESSION_TOKEN_TEMP" >> $BASH_ENV
+            source $BASH_ENV
+            cat $BASH_ENV | grep AWS_ACCESS_KEY_ID >> assume_role_creds_<< parameters.job_type >>.txt
+            cat $BASH_ENV | grep AWS_SECRET_ACCESS_KEY >> assume_role_creds_<< parameters.job_type >>.txt
+            cat $BASH_ENV | grep AWS_SESSION_TOKEN >> assume_role_creds_<< parameters.job_type >>.txt
+      - when:
+          condition: << parameters.update_kubeconfig >>
+          steps:
+            - run:
+                name: Update kubeconfig clustername
+                command: aws --region << parameters.aws_region >> eks update-kubeconfig --name << parameters.eks_cluster >>
+            - run:
+                name: Update kubectl credentials
+                command: cp ~/.kube/config kube_<< parameters.job_type >>.config
+      - persist_to_workspace:
+          root: ./
+          paths:
+            - assume_role_creds_<< parameters.job_type >>.txt
+            - kube_<< parameters.job_type >>.config
+  # General - should be in core
+  aws_assume_role_file:
+    description: Assume AWS role from the workspace file
+    parameters:
+      job_type:
+        description: The job type to be used
+        type: string
+        default: "default"
+    steps:
+      - run:
+          name: Assume role from file
+          command: |
+            cat assume_role_creds_<< parameters.job_type >>.txt >> $BASH_ENV
+            source $BASH_ENV
+  # General - should be in core
+  terraform_init:
+    description: Run Terraform Init
+    parameters:
+      path:
+        type: string
+      terraform_arg:
+        description: provide terraform arguments
+        type: string
+        default: ""
+    steps:
+      - run:
+          name: Terraform init
+          command: |
+            source $BASH_ENV
+            cd << parameters.path >>
+            terraform init << parameters.terraform_arg >>
+  # General - should be in core
+  terraform_plan:
+    description: Run Terraform Plan
+    parameters:
+      path:
+        type: string
+      terraform_arg:
+        description: provide terraform arguments
+        type: string
+        default: ""
+    steps:
+      - run:
+          name: Terraform plan
+          command: |
+            source $BASH_ENV
+            cd << parameters.path >>
+            terraform plan -out=tfplan -input=false << parameters.terraform_arg >>
+  # General - should be in core
+  terraform_apply:
+    description: Run Terraform Apply
+    parameters:
+      path:
+        type: string
+    steps:
+      - run:
+          name: Terraform apply
+          command: |
+            source $BASH_ENV
+            cd << parameters.path >>
+            terraform apply -input=false tfplan
+  # General - should be in core
+  terraform_force_apply:
+    description: Run Terraform Apply
+    parameters:
+      path:
+        type: string
+    steps:
+      - run:
+          name: Terraform forced apply
+          command: |
+            source $BASH_ENV
+            cd << parameters.path >>
+            terraform apply -auto-approve
+  # General - should be in core
+  git_config_user:
+    description: Configure git user
+    parameters:
+      user:
+        type: string
+        default: ${GIT_USERNAME}
+      email:
+        type: string
+        default: "${GIT_EMAIL}"
+    steps:
+      - run:
+          name: Configure git user
+          command: |
+            git config --global user.email "<< parameters.email >>"
+            git config --global user.name "<< parameters.user >>"
+  # Core
+  set_helm_environment:
+    description: "Set environment variables for helm"
+    parameters:
+      environment:
+        type: string
+      package:
+        type: string
+      release:
+        description: Helm release name
+        type: string
+        default: ncu-newskit-render
+      namespace:
+        description: Kubernetes namespace
+        type: string
+      node_env:
+        description: Node environment name
+        type: string
+        default: production
+    steps:
+      - run:
+          name: "Set environment variables for helm"
+          command: |
+            cd packages/<< parameters.package >>
+            export PKG_VERSION=$(jq -r .version package.json)
+            echo "export PKG_VERSION=$PKG_VERSION" >> $BASH_ENV
+            echo 'export KUBECONFIG=$(pwd)/kube_eks_<< parameters.environment >>.config' >> $BASH_ENV
+            echo 'export HELM_OPT_NAMESPACE="-n << parameters.namespace >>"' >> $BASH_ENV
+            echo 'export HELM_VAL_ENV=<< parameters.environment >>' >> $BASH_ENV
+            echo 'export NODE_ENV=<< parameters.node_env >>' >> $BASH_ENV
+            if [ -n "$CIRCLE_PULL_REQUEST" ]; then
+              export PR_NUMBER=$(echo ${CIRCLE_PULL_REQUEST} |rev | cut -d "/" -f1 |rev)
+              echo "export PR_NUMBER=$PR_NUMBER" >> $BASH_ENV
+              echo 'export HELM_OPT_SET="--set alb.prSuffix=pr-$PR_NUMBER"' >> $BASH_ENV
+              echo 'export HELM_OPT_SET="$HELM_OPT_SET --set image.tag=PR-$PR_NUMBER "' >> $BASH_ENV
+              echo 'export HELM_OPT_SET="$HELM_OPT_SET --set secret.items.NEWSKIT_API_X_API_KEY=${NEWSKIT_API_X_API_KEY}"' >> $BASH_ENV
+              echo 'export HELM_NAME="<< parameters.release >>-<< parameters.package >>-pr$PR_NUMBER"' >> $BASH_ENV
+            else
+              export PR_NUMBER=$(git log --format=%B -n 1 HEAD | grep -oE -m 1 '\(#[0-9]+\)' | grep -oE '[0-9]+')
+              echo "export PR_NUMBER=$PR_NUMBER" >> $BASH_ENV
+              echo 'export HELM_OPT_SET="--set image.tag=$PKG_VERSION "' >> $BASH_ENV
+              echo 'export HELM_OPT_SET="$HELM_OPT_SET --set secret.items.NEWSKIT_API_X_API_KEY=${NEWSKIT_API_X_API_KEY}"' >> $BASH_ENV
+              if [ "<< parameters.environment >>" = pr  ]; then
+                echo 'export HELM_NAME="<< parameters.release >>-<< parameters.package >>-pr$PR_NUMBER"' >> $BASH_ENV
+              else
+                echo 'export HELM_NAME="<< parameters.release >>-<< parameters.package >>"' >> $BASH_ENV
+              fi
+            fi
+            echo 'export HELM_OPT_SET="$HELM_OPT_SET --set envs.SOURCEPOINT_ACCOUNT_ID=${SOURCEPOINT_ACCOUNT_ID}"' >> $BASH_ENV
+            echo 'export HELM_OPT_SET="$HELM_OPT_SET --set envs.SOURCEPOINT_PROPERTY_HREF=${SOURCEPOINT_PROPERTY_HREF}"' >> $BASH_ENV
+            echo 'export HELM_OPT_SET="$HELM_OPT_SET --set envs.SOURCEPOINT_PROPERTY_ID=${SOURCEPOINT_PROPERTY_ID}"' >> $BASH_ENV
+            echo 'export HELM_OPT_SET="$HELM_OPT_SET --set envs.EXPERIMENTATION_WEB=${EXPERIMENTATION_WEB}"' >> $BASH_ENV
+            echo 'export HELM_OPT_SET="$HELM_OPT_SET --set envs.TEALIUM_ACCOUNT_ID=${TEALIUM_ACCOUNT_ID}"' >> $BASH_ENV
+            echo 'export HELM_OPT_SET="$HELM_OPT_SET --set envs.TEALIUM_PROFILE_ID=${TEALIUM_PROFILE_ID}"' >> $BASH_ENV
+            echo 'export HELM_OPT_SET="$HELM_OPT_SET --set envs.TEALIUM_ENV=${TEALIUM_ENV}"' >> $BASH_ENV
+            echo 'export HELM_OPT_SET="$HELM_OPT_SET --set envs.PUBLISHER=${PUBLISHER}"' >> $BASH_ENV
+            echo 'export HELM_OPT_SET="$HELM_OPT_SET --set secret.items.NEW_RELIC_LICENSE_KEY=${NEW_RELIC_LICENSE_KEY}"' >> $BASH_ENV
+            echo 'export HELM_OPT_SET="$HELM_OPT_SET --set secret.items.MAIN_GRAPHQL_URL=${MAIN_GRAPHQL_URL}"' >> $BASH_ENV
+            echo 'export HELM_OPT_SET="$HELM_OPT_SET --set secret.items.ACS_SESSION_URL=${ACS_SESSION_URL}"' >> $BASH_ENV
+            echo 'export HELM_OPT_SET="$HELM_OPT_SET --set secret.items.ACS_TEST_ACCOUNT=${ACS_TEST_ACCOUNT}"' >> $BASH_ENV
+            echo 'export HELM_OPT_SET="$HELM_OPT_SET --set secret.items.ACS_TEST_PASSWORD=${ACS_TEST_PASSWORD}"' >> $BASH_ENV                                
+            echo 'export HELM_OPT_SET="$HELM_OPT_SET --set secret.items.MAIN_AUDIENCE=${MAIN_AUDIENCE}"' >> $BASH_ENV
+            echo 'export HELM_OPT_SET="$HELM_OPT_SET --set secret.items.MAIN_OAUTH_TOKEN=${MAIN_OAUTH_TOKEN}"' >> $BASH_ENV
+            echo 'export HELM_OPT_SET="$HELM_OPT_SET --set secret.items.MAIN_CLIENT_ID=${MAIN_CLIENT_ID}"' >> $BASH_ENV
+            echo 'export HELM_OPT_SET="$HELM_OPT_SET --set secret.items.MAIN_CLIENT_SECRET=${MAIN_CLIENT_SECRET}"' >> $BASH_ENV
+            echo 'export HELM_OPT_SET="$HELM_OPT_SET --set secret.items.MAIN_INTERNAL_AUTH0_DOMAIN=${MAIN_INTERNAL_AUTH0_DOMAIN}"' >> $BASH_ENV
+            echo 'export HELM_OPT_SET="$HELM_OPT_SET --set secret.items.MAIN_INTERNAL_CONNECTION=${MAIN_INTERNAL_CONNECTION}"' >> $BASH_ENV
+            echo 'export HELM_OPT_SET="$HELM_OPT_SET --set secret.items.MAIN_INTERNAL_CLIENT_ID=${MAIN_INTERNAL_CLIENT_ID}"' >> $BASH_ENV
+            echo 'export HELM_OPT_SET="$HELM_OPT_SET --set secret.items.STRIPE_KEY=${STRIPE_KEY}"' >> $BASH_ENV
+            echo 'export HELM_OPT_SET="$HELM_OPT_SET --set secret.items.LOQACCOUNT_KEY=${LOQACCOUNT_KEY}"' >> $BASH_ENV
+            echo 'export HELM_OPT_SET="$HELM_OPT_SET --set secret.items.SAILTHRU_API_SECRET=${SAILTHRU_API_SECRET}"' >> $BASH_ENV
+            echo 'export HELM_OPT_SET="$HELM_OPT_SET --set secret.items.SAILTHRU_DOMAIN=${SAILTHRU_DOMAIN}"' >> $BASH_ENV
+            echo 'export HELM_OPT_SET="$HELM_OPT_SET --set secret.items.OKTA_CLIENT_ID=${OKTA_CLIENT_ID}"' >> $BASH_ENV
+            echo 'export HELM_OPT_SET="$HELM_OPT_SET --set secret.items.OKTA_CLIENT_SECRET=${OKTA_CLIENT_SECRET}"' >> $BASH_ENV
+            echo 'export HELM_OPT_SET="$HELM_OPT_SET --set secret.items.OKTA_DOMAIN=${OKTA_DOMAIN}"' >> $BASH_ENV
+            echo 'export HELM_OPT_SET="$HELM_OPT_SET --set secret.items.NEXTAUTH_URL=${NEXTAUTH_URL}"' >> $BASH_ENV
+            echo 'export HELM_OPT_SET="$HELM_OPT_SET --set secret.items.NEXTAUTH_SECRET=${NEXTAUTH_SECRET}"' >> $BASH_ENV
+            echo 'export HELM_OPT_SET="$HELM_OPT_SET --set secret.items.SN_PASSWORD=${SN_PASSWORD}"' >> $BASH_ENV
+            echo 'export HELM_OPT_SET="$HELM_OPT_SET --set secret.items.SN_USERNAME=${SN_USERNAME}"' >> $BASH_ENV
+            echo 'export HELM_OPT_SET="$HELM_OPT_SET --set secret.items.SN_ENVIRONMENT=${SN_ENVIRONMENT}"' >> $BASH_ENV
+            echo 'export HELM_OPT_SET="$HELM_OPT_SET --set secret.items.ZUORA_PAGE_ID=${ZUORA_PAGE_ID}"' >> $BASH_ENV
+            echo 'export HELM_OPT_SET="$HELM_OPT_SET --set secret.items.ZUORA_RSA_SIGNATURE_URI=${ZUORA_RSA_SIGNATURE_URI}"' >> $BASH_ENV
+            echo 'export HELM_OPT_SET="$HELM_OPT_SET --set secret.items.OPTIMIZELY_SDK_KEY=${OPTIMIZELY_SDK_KEY}"' >> $BASH_ENV
+            echo 'export HELM_OPT_SET="$HELM_OPT_SET --set secret.items.ALGOLIA_APP_ID=${ALGOLIA_APP_ID}"' >> $BASH_ENV
+            echo 'export HELM_OPT_SET="$HELM_OPT_SET --set secret.items.ALGOLIA_API_KEY=${ALGOLIA_API_KEY}"' >> $BASH_ENV
+            echo 'export HELM_OPT_SET="$HELM_OPT_SET --set secret.items.ALGOLIA_INDEX=${ALGOLIA_INDEX}"' >> $BASH_ENV
+            echo 'export HELM_PATH="helm"' >> $BASH_ENV
+            echo 'export HELM_VALUES="--values $HELM_PATH/values-$HELM_VAL_ENV.yaml"' >> $BASH_ENV
+            echo 'export HELM_INSTALL="helm install --atomic $HELM_VALUES $HELM_OPT_SET $HELM_OPT_NAMESPACE"' >> $BASH_ENV
+            echo 'export HELM_UNINSTALL="helm uninstall $HELM_OPT_NAMESPACE"' >> $BASH_ENV
+            echo 'export HELM_LIST="helm list $HELM_OPT_NAMESPACE"' >> $BASH_ENV
+            echo 'export HELM_LIST_ALL="$HELM_LIST --all --short"' >> $BASH_ENV
+            echo 'export HELM_UPGRADE="helm upgrade --atomic $HELM_VALUES $HELM_OPT_SET $HELM_OPT_NAMESPACE"' >> $BASH_ENV
+  # Lerna and monorepo specific
+  create_concatenated_package_lock:
+    description: "Concatenate all yarn.lock files recognized by lerna.js into single file. File is used as checksum source for part of caching key."
+    parameters:
+      filename:
+        type: string
+    steps:
+      - run:
+          name: Combine yarn.lock files to single file
+          command: npx lerna ll --ignore "*/infrastructure*" | awk -F packages '{printf "\"packages%s/yarn.lock\" ", $2}' | xargs cat > << parameters.filename >>
+  # Not required for core
+  get_correct_package:
+    parameters:
+      package:
+        type: string
+        default: ""
+    description: Get correct package name from tag or passed param
+    steps:
+      - run:
+          name: Get correct package
+          command: |
+            if [ -n "$CIRCLE_TAG" ]; then
+              PACKAGE=$(echo "$CIRCLE_TAG" | grep -oE '/.*@' | grep -oE '[a-z|-]+')
+              echo "export PACKAGE=$PACKAGE" >> $BASH_ENV
+            else
+              echo "export PACKAGE=<< parameters.package >>" >> $BASH_ENV
+            fi
+jobs:
+  # Lerna specific
+  check_changes:
+    working_directory: ~/project
+    executor: node
+    steps:
+      - checkout
+      - attach_workspace:
+          at: ~/project
+      - run:
+          name: Check for changed packages
+          command: npx lerna changed > changed.tmp || true
+      - persist_to_workspace:
+          root: ./
+          paths:
+            - changed.tmp
+  pact_can_i_deploy:
+    executor: pact
+    steps:
+      - run:
+          name: Pact can I deploy
+          command: pact-broker can-i-deploy --pacticipant=$PACT_PARTICIPANT --latest --broker-base-url=$PACT_BROKER_URL --broker-token=$PACT_BROKER_TOKEN
+  # General - should be in core
+  init_aws:
+    parameters:
+      aws_access_key_id:
+        description: AWS Access Key Id
+        type: string
+        default: "${AWS_ACCESS_KEY_ID}"
+      aws_secret_key:
+        description: AWS Secret Key
+        type: string
+        default: "${AWS_SECRET_ACCESS_KEY}"
+      aws_assume_role_arn:
+        description: AWS ARN For Assume Role
+        type: string
+        default: "${AWS_ASSUME_ROLE_ARN}"
+      job_type:
+        type: string
+        default: "default"
+      update_kubeconfig:
+        type: boolean
+        default: true
+    working_directory: ~/project
+    executor: helm
+    steps:
+      - run:
+          name: Install openssh client
+          command: apk add openssh-client
+      - checkout
+      - aws_assume_role:
+          aws_access_key_id: << parameters.aws_access_key_id >>
+          aws_secret_key: << parameters.aws_secret_key >>
+          aws_assume_role_arn: << parameters.aws_assume_role_arn >>
+          job_type: << parameters.job_type >>
+          update_kubeconfig: << parameters.update_kubeconfig >>
+  # General - should be in core
+  deploy_terraform:
+    parameters:
+      team:
+        description: Used to generate the S3 bucket key i.e. product-platforms
+        type: string
+        default: product-platforms
+      project:
+        description: Used to generate the S3 bucket key i.e. ncu-newskit-render
+        type: string
+      scope:
+        description: lerna package scope
+        type: string
+      package:
+        description: Used to generate the S3 bucket key and navigate to package folder i.e. infrastructure-ecr
+        type: string
+        default: tag
+      path_prefix:
+        description: Folder containing node packages in the project
+        type: string
+        default: packages/
+      path_suffix:
+        description: Folder containing the terraform code in the package
+        type: string
+        default: /terraform
+      environment:
+        type: string
+        default: dev
+      apply:
+        type: boolean
+        default: false
+    working_directory: ~/project
+    executor: terraform
+    steps:
+      - checkout
+      - attach_workspace:
+          at: ~/project
+      - should_run:
+          package: << parameters.package >>
+          scope: << parameters.scope >>
+      - aws_assume_role_file
+      - run:
+          name: Set environment for terraform
+          command: |
+            PACKAGE=<< parameters.package >>
+            PACKAGE_PATH="<< parameters.path_prefix >>$PACKAGE<< parameters.path_suffix >>"
+            echo "export PACKAGE=$PACKAGE" >> $BASH_ENV
+            echo "export PACKAGE_PATH=$PACKAGE_PATH" >> $BASH_ENV
+      - terraform_init:
+          path: ${PACKAGE_PATH}
+          terraform_arg: -backend-config="key=<<parameters.team >>/<< parameters.project >>/${PACKAGE}/<< parameters.environment >>/terraform.tfstate"
+      - terraform_plan:
+          path: ${PACKAGE_PATH}
+          terraform_arg: -var-file=<< parameters.environment >>.tfvars
+      - when:
+          condition: << parameters.apply >>
+          steps:
+            - terraform_apply:
+                path: ${PACKAGE_PATH}
+  # General - should be in core
+  install_deps:
+    executor: node
+    steps:
+      - checkout
+      - create_concatenated_package_lock:
+          filename: combined-package-lock.txt
+      - restore_cache:
+          keys:
+            - yarn-cache-key-{{ .Environment.BUILD_CACHE_VERSION }}-{{ checksum "yarn.lock" }}-{{ checksum "combined-package-lock.txt" }}
+            - yarn-cache-key-{{ .Environment.BUILD_CACHE_VERSION }}-{{ checksum "yarn.lock" }}-
+            - yarn-cache-key-{{ .Environment.BUILD_CACHE_VERSION }}-
+      - restore_cache:
+          keys:
+            - cypress-cache-key-{{ .Environment.CYPRESS_CACHE_VERSION }}-{{ checksum "yarn.lock" }}-{{ checksum "combined-package-lock.txt" }}
+            - cypress-cache-key-{{ .Environment.CYPRESS_CACHE_VERSION }}-{{ checksum "yarn.lock" }}-
+            - cypress-cache-key-{{ .Environment.CYPRESS_CACHE_VERSION }}-
+      - restore_cache:
+          keys:
+            - yarn-cache-key-{{ .Environment.BUILD_CACHE_VERSION }}-myaccount-{{ checksum "yarn.lock" }}-{{ checksum "combined-package-lock.txt" }}
+            - yarn-cache-key-{{ .Environment.BUILD_CACHE_VERSION }}-myaccount-{{ checksum "yarn.lock" }}-
+            - yarn-cache-key-{{ .Environment.BUILD_CACHE_VERSION }}-myaccount-
+      - run:
+          name: "Run bootstrap"
+          command: yarn bootstrap
+      - save_cache:
+          key: yarn-cache-key-{{ .Environment.BUILD_CACHE_VERSION }}-{{ checksum "yarn.lock" }}-{{ checksum "combined-package-lock.txt" }}
+          paths:
+            - ~/.cache/yarn
+            - node_modules
+            - packages/mock/node_modules
+            - packages/core/node_modules
+            - packages/core/.next/cache
+            - packages/create-render-app/node_modules
+            - packages/auth/node_modules
+            - packages/feed/node_modules
+            - packages/api/node_modules
+      - save_cache:
+          key: yarn-cache-key-{{ .Environment.BUILD_CACHE_VERSION }}-myaccount-{{ checksum "yarn.lock" }}-{{ checksum "combined-package-lock.txt" }}
+          paths:
+            - packages/my-account/node_modules
+            - packages/validation/node_modules
+            - packages/shared-components/node_modules
+            - packages/standalone-components/node_modules
+            - packages/feature-flags/node_modules
+            - packages/checkout/node_modules
+            - packages/api/node_modules
+      - save_cache:
+          key: cypress-cache-key-{{ .Environment.CYPRESS_CACHE_VERSION }}-{{ checksum "yarn.lock" }}-{{ checksum "combined-package-lock.txt" }}
+          paths:
+            - ~/.cache/Cypress
+      - persist_to_workspace:
+          root: ./
+          paths:
+            - packages/*/dist/*
+            - packages/core/.next
+            - combined-package-lock.txt
+
+  lint:
+    executor: node
+    steps:
+      - checkout
+      - attach_workspace:
+          at: ~/project
+      - restore_cache:
+          keys:
+            - yarn-cache-key-{{ .Environment.BUILD_CACHE_VERSION }}-{{ checksum "yarn.lock" }}-{{ checksum "combined-package-lock.txt" }}
+      - restore_cache:
+          keys:
+            - yarn-cache-key-{{ .Environment.BUILD_CACHE_VERSION }}-myaccount-{{ checksum "yarn.lock" }}-{{ checksum "combined-package-lock.txt" }}
+      - run:
+          name: "Run lint"
+          command: |
+            yarn lint
+  unit_tests:
+    executor: node
+    steps:
+      - checkout
+      - attach_workspace:
+          at: ~/project
+      - restore_cache:
+          keys:
+            - yarn-cache-key-{{ .Environment.BUILD_CACHE_VERSION }}-{{ checksum "yarn.lock" }}-{{ checksum "combined-package-lock.txt" }}
+      - restore_cache:
+          keys:
+            - yarn-cache-key-{{ .Environment.BUILD_CACHE_VERSION }}-myaccount-{{ checksum "yarn.lock" }}-{{ checksum "combined-package-lock.txt" }}
+      - run:
+          name: "Run tests"
+          command: |
+            mkdir tests
+            yarn test:unit:ci
+          environment:
+            JEST_JUNIT_OUTPUT_DIR: /home/circleci/project/tests
+
+  pact_tests:
+    executor: node
+    steps:
+      - checkout
+      - attach_workspace:
+          at: ~/project
+      - restore_cache:
+          keys:
+            - yarn-cache-key-{{ .Environment.BUILD_CACHE_VERSION }}-{{ checksum "yarn.lock" }}-{{ checksum "combined-package-lock.txt" }}
+      - restore_cache:
+          keys:
+            - yarn-cache-key-{{ .Environment.BUILD_CACHE_VERSION }}-myaccount-{{ checksum "yarn.lock" }}-{{ checksum "combined-package-lock.txt" }}
+      - run:
+          name: "Run pact tests"
+          command: |
+            yarn pact:test
+      - run:
+          name: "Run publish pact tests"
+          command: |
+            yarn pact:publish
+      - store_test_results:
+          path: tests
+      - store_artifacts:
+          path: tests
+          destination: tests
+
+  # Core
+  e2e_test:
+    parameters:
+      package:
+        type: string
+    executor: node
+    steps:
+      - checkout
+      - attach_workspace:
+          at: ~/project
+      - restore_cache:
+          keys:
+            - yarn-cache-key-{{ .Environment.BUILD_CACHE_VERSION }}-{{ checksum "yarn.lock" }}-{{ checksum "combined-package-lock.txt" }}
+      - restore_cache:
+          keys:
+            - yarn-cache-key-{{ .Environment.BUILD_CACHE_VERSION }}-myaccount-{{ checksum "yarn.lock" }}-{{ checksum "combined-package-lock.txt" }}
+      - restore_cache:
+          keys:
+            - cypress-cache-key-{{ .Environment.CYPRESS_CACHE_VERSION }}-{{ checksum "yarn.lock" }}-{{ checksum "combined-package-lock.txt" }}
+      - should_run:
+          package: << parameters.package >>
+      - run:
+          name: "Export Newskit API variables"
+          <<: *newskit_api_defaults
+      - run:
+          name: "Replace Zuora page ID"
+          command: |
+            echo "export ZUORA_PAGE_ID=$ZUORA_PAGE_ID_E2E" >> $BASH_ENV
+      - run:
+          name: "install cypress dependencies"
+          command: |
+            sudo apt-get update
+            sudo apt-get install libgtk2.0-0 libgtk-3-0 libgbm-dev libnotify-dev libgconf-2-4 libnss3 libxss1 libasound2 libxtst6 xauth xvfb
+      - browser-tools/install-chrome
+      - browser-tools/install-chromedriver
+      - run:
+          name: Check chrome install
+          command: |
+            google-chrome --version
+            chromedriver --version
+      - run:
+          name: "start server"
+          command: |
+            cd packages/core
+            yarn start:test:server
+          background: true
+      - run:
+          name: "Wait test server"
+          command: |
+            cd packages/core
+            yarn wait:server
+      - run:
+          name: "Run e2e tests"
+          command: |
+            cd packages/<< parameters.package >>
+            yarn cy:run
+      - store_artifacts:
+          path: packages/<< parameters.package >>/cypress/screenshots
+      - store_artifacts:
+          path: packages/<< parameters.package >>/cypress/videos
+  # Core
+  publish_docker:
+    parameters:
+      package:
+        type: string
+      project:
+        description: Project name that will be used to tag docker images i.e ncu-newskit-render
+        type: string
+        default: ncu-newskit-render
+      scope:
+        type: string
+        default: "@newskit-render"
+    working_directory: ~/project
+    executor: node
+    steps:
+      - checkout
+      - attach_workspace:
+          at: ~/project
+      - restore_cache:
+          keys:
+            - yarn-cache-key-{{ .Environment.BUILD_CACHE_VERSION }}-{{ checksum "yarn.lock" }}-{{ checksum "combined-package-lock.txt" }}
+      - restore_cache:
+          keys:
+            - yarn-cache-key-{{ .Environment.BUILD_CACHE_VERSION }}-myaccount-{{ checksum "yarn.lock" }}-{{ checksum "combined-package-lock.txt" }}
+      - should_run:
+          package: << parameters.package >>
+      - setup_remote_docker
+      - run:
+          name: Install aws cli
+          command: |
+            sudo apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 4EB27DB2A3B88B8B
+            sudo apt-get --allow-releaseinfo-change update -y
+            sudo apt-get install python python3-pip
+            sudo pip install awscli
+      - aws_assume_role_file
+      - run:
+          name: Publish Docker containers to AWS ECR
+          no_output_timeout: 30m
+          command: |
+            cd packages/<< parameters.package >>
+            if [ -n "$CIRCLE_PULL_REQUEST" ]; then
+              export PR_NUMBER=$(echo ${CIRCLE_PULL_REQUEST} |rev | cut -d "/" -f1 |rev)
+              TAGS="PR-$PR_NUMBER"
+            else
+              TAG_VERSION=$(jq -r .version package.json)
+              TAGS="$TAG_VERSION latest"
+            fi
+            DOCKER_REGISTRY_URL="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+            npm prune --production
+            pkg_path=node_modules/<< parameters.scope >>/
+            for link in $pkg_path/*; do
+              if [ -L $link ]; then
+                target=$pkg_path/`readlink $link`
+                if [ -d $target/node_modules ]; then
+                  cd $target
+                  npm prune --production
+                  cd -
+                fi
+                rm $link
+                cp -r $target $link
+              fi
+            done
+            echo $DOCKER_PASSWORD | docker login -u $DOCKER_USERNAME --password-stdin
+            docker build -t << parameters.project >>-<< parameters.package >> .
+            $(aws ecr get-login --no-include-email)
+            for tag in $TAGS; do
+              docker tag << parameters.project >>-<< parameters.package >> $DOCKER_REGISTRY_URL/<< parameters.project >>-<< parameters.package >>:$tag;
+              docker push $DOCKER_REGISTRY_URL/<< parameters.project >>-<< parameters.package >>:$tag;
+            done
+  # Core
+  uninstall_helm:
+    parameters:
+      package:
+        type: string
+      environment:
+        description: Environment name
+        type: string
+      release:
+        description: Helm release name
+        type: string
+        default: ncu-newskit-render
+    working_directory: ~/project
+    executor: helm
+    steps:
+      - run:
+          name: Install ssh client
+          command: apk add openssh-client
+      - checkout
+      - attach_workspace:
+          at: ~/project
+      - should_run:
+          package: << parameters.package >>
+      - aws_assume_role_file:
+          job_type: eks_<< parameters.environment >>
+      - set_helm_environment:
+          environment: << parameters.environment >>
+          package: << parameters.package >>
+          release: << parameters.release >>
+          namespace: newskit-render-<< parameters.environment >>
+      - run:
+          name: Helm uninstall
+          command: |
+            source $BASH_ENV
+            cd packages/<< parameters.package >>
+            if $HELM_LIST | grep -q $HELM_NAME; then $HELM_UNINSTALL $HELM_NAME; fi
+  # Core
+  remove_all_pr_environments:
+    working_directory: ~/project
+    executor: helm
+    steps:
+      - run:
+          name: Install ssh client
+          command: apk add openssh-client
+      - checkout
+      - attach_workspace:
+          at: ~/project
+      - aws_assume_role:
+          aws_access_key_id: ${DEV_EKS_AWS_ACCESS_KEY_ID}
+          aws_secret_key: ${DEV_EKS_AWS_SECRET_ACCESS_KEY}
+          aws_assume_role_arn: ${DEV_EKS_AWS_ASSUME_ROLE_ARN}
+          eks_cluster: ${DEV_AWS_EKS_CLUSTER}
+          update_kubeconfig: true
+          job_type: eks_pr
+      - set_helm_environment:
+          environment: pr
+          package: ""
+          namespace: newskit-render-pr
+      - run:
+          name: Remove all PR environments
+          command: |
+            source $BASH_ENV
+            if [ -n "$($HELM_LIST_ALL)" ]; then $HELM_LIST_ALL | xargs $HELM_UNINSTALL; fi
+  # Core
+  upgrade_helm:
+    parameters:
+      package:
+        type: string
+        default: tag
+      environment:
+        description: Environment name
+        type: string
+      node_env:
+        description: Node environment name
+        type: string
+        default: production
+      create:
+        description: Whether to create a new Helm package
+        type: boolean
+        default: false
+      release:
+        description: Helm release name
+        type: string
+        default: ncu-newskit-render
+      helm_repo:
+        description: Helm S3 repo url
+        type: string
+        default: s3://product-platforms-helm-charts
+    working_directory: ~/project
+    executor: helm
+    steps:
+      - run:
+          name: Install ssh client
+          command: apk add openssh-client
+      - checkout
+      - attach_workspace:
+          at: ~/project
+      - run:
+          name: Check if pipeline is triggered by tag
+          command: |
+            if [ -n "$CIRCLE_TAG" ]; then
+              PACKAGE=$(echo "$CIRCLE_TAG" | grep -oE '/.*@' | grep -oE '[a-z|-]+')
+              echo "export PACKAGE=$PACKAGE" >> $BASH_ENV
+            else
+              echo "export PACKAGE=<< parameters.package >>" >> $BASH_ENV
+            fi
+      - should_run:
+          package: ${PACKAGE}
+      - set_helm_environment:
+          environment: << parameters.environment >>
+          package: ${PACKAGE}
+          node_env: << parameters.node_env >>
+          release: << parameters.release >>
+          namespace: newskit-render-<< parameters.environment >>
+      - run:
+          name: Install helm s3 plugin
+          command: helm plugin install https://github.com/hypnoglow/helm-s3.git --version 0.13.0
+      - aws_assume_role_file
+      - when:
+          condition: << parameters.create >>
+          steps:
+            - run:
+                name: Helm package and upload
+                command: |
+                  source $BASH_ENV
+                  cd packages/${PACKAGE}
+                  if ! aws s3 ls << parameters.helm_repo >>/<< parameters.release >>/${PACKAGE}/ | grep index.yaml; then
+                    helm s3 init << parameters.helm_repo >>/<< parameters.release >>/${PACKAGE}
+                  else
+                    echo "Repo already initialized";
+                  fi
+                  helm repo add << parameters.release >>-${PACKAGE} << parameters.helm_repo >>/<< parameters.release >>/${PACKAGE}
+                  helm package -u --version $PKG_VERSION --app-version $PKG_VERSION $HELM_PATH;
+                  mv << parameters.release >>-${PACKAGE}-*.tgz << parameters.release >>-${PACKAGE}-$PKG_VERSION.tgz;
+                  if [ "$HELM_VAL_ENV" != "pr" ]; then
+                    helm s3 push --force ./<< parameters.release >>-${PACKAGE}-$PKG_VERSION.tgz << parameters.release >>-${PACKAGE};
+                  fi
+      - unless:
+          condition: << parameters.create >>
+          steps:
+            - run:
+                name: Download helm chart
+                command: |
+                  source $BASH_ENV
+                  cd packages/${PACKAGE}
+                  helm repo add << parameters.release >>-${PACKAGE} << parameters.helm_repo >>/<< parameters.release >>/${PACKAGE}
+                  helm pull << parameters.release >>-${PACKAGE}/<< parameters.release >>-${PACKAGE} --version $PKG_VERSION;
+      - aws_assume_role_file:
+          job_type: eks_<< parameters.environment >>
+      - run:
+          name: Helm deploy
+          command: |
+            source $BASH_ENV
+            cd packages/${PACKAGE}
+            $HELM_UPGRADE --install $HELM_NAME << parameters.release >>-${PACKAGE}-*.tgz --version $PKG_VERSION
+      - when:
+          condition:
+            and:
+              - not:
+                  equal: [mock, $PACKAGE]
+              - not:
+                  equal: [pr, << parameters.environment >>]
+          steps:
+            - run:
+                name: Add Deployment Marker to New Relic
+                command: |
+                  source $BASH_ENV
+                  CURRENT_VERSION=$(jq -r .version ./packages/${PACKAGE}/package.json)
+                  PACKAGE_CAP="${PACKAGE^}"
+                  APP_ID=$(curl -s -X GET "https://api.newrelic.com/v2/applications.json" -H "X-Api-Key:${TF_VAR_newrelic_api_key}" -G -d "filter[name]=NK:REN:$PACKAGE_CAP:<< parameters.environment >>" | jq -r '.applications[]' | jq -r '.id')
+                  curl -X POST "https://api.newrelic.com/v2/applications/$APP_ID/deployments.json" -H "Api-Key:${TF_VAR_newrelic_api_key}" -i -H "Content-Type: application/json" -d '{ "deployment": { "revision": "'$CURRENT_VERSION'" } }'
+  # Not required for core
+  create_render_app_build_test:
+    working_directory: ~/project
+    executor: node
+    steps:
+      - checkout
+      - attach_workspace:
+          at: ~/project
+      - restore_cache:
+          keys:
+            - yarn-cache-key-{{ .Environment.BUILD_CACHE_VERSION }}-{{ checksum "yarn.lock" }}-{{ checksum "combined-package-lock.txt" }}
+            - yarn-cache-key-{{ .Environment.BUILD_CACHE_VERSION }}-{{ checksum "yarn.lock" }}-
+            - yarn-cache-key-{{ .Environment.BUILD_CACHE_VERSION }}-
+      - restore_cache:
+          keys:
+            - yarn-cache-key-{{ .Environment.BUILD_CACHE_VERSION }}-myaccount-{{ checksum "yarn.lock" }}-{{ checksum "combined-package-lock.txt" }}
+            - yarn-cache-key-{{ .Environment.BUILD_CACHE_VERSION }}-myaccount-{{ checksum "yarn.lock" }}-
+            - yarn-cache-key-{{ .Environment.BUILD_CACHE_VERSION }}-myaccount-
+      - run:
+          name: "Run scaffold process"
+          command: cd packages/create-render-app && yarn scaffold --defaults
+      - run:
+          name: "Run build process"
+          command: cd ../cra-test && yarn build
+  # Not required for core
+  publish_package_to_npm:
+    parameters:
+      package:
+        type: string
+        default: ""
+      alpha:
+        type: boolean
+        default: false
+    working_directory: ~/project
+    executor: node
+    steps:
+      - checkout
+      - attach_workspace:
+          at: ~/project
+      - when:
+          condition:
+            not:
+              equal: ["", << parameters.package >>]
+          steps:
+            - should_run:
+                package: << parameters.package >>
+      - get_correct_package:
+          package: << parameters.package >>
+      - create_concatenated_package_lock:
+          filename: combined-package-lock.txt
+      - restore_cache:
+          keys:
+            - yarn-cache-key-{{ .Environment.BUILD_CACHE_VERSION }}-{{ checksum "yarn.lock" }}-{{ checksum "combined-package-lock.txt" }}
+      - restore_cache:
+          keys:
+            - yarn-cache-key-{{ .Environment.BUILD_CACHE_VERSION }}-myaccount-{{ checksum "yarn.lock" }}-{{ checksum "combined-package-lock.txt" }}
+      - run:
+          name: "Run bootstrap"
+          command: yarn bootstrap
+      - add_ssh_keys:
+          fingerprints:
+            - "fe:62:c3:74:21:1f:73:a0:ec:0b:37:f7:2a:f9:a1:9e"
+      - git_config_user
+      - when:
+          condition: << parameters.alpha >>
+          steps:
+            - run:
+                name: "Publish alpha version to npm"
+                command: |
+                  source $BASH_ENV
+                  echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > ~/.npmrc
+                  cd packages/$PACKAGE
+                  npm prune --production
+                  ls
+                  npm publish --tag alpha
+      - unless:
+          condition: << parameters.alpha >>
+          steps:
+            - run:
+                name: "Publish official version to npm"
+                command: |
+                  source $BASH_ENV
+                  echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > ~/.npmrc
+                  cd packages/$PACKAGE
+                  npm prune --production
+                  ls
+                  npm publish
+  # Lerna specific
+  bump_version:
+    parameters:
+      alpha:
+        type: boolean
+        default: false
+    working_directory: ~/project
+    executor: node
+    steps:
+      - checkout
+      - attach_workspace:
+          at: ~/project
+      - add_ssh_keys:
+          fingerprints:
+            - "fe:62:c3:74:21:1f:73:a0:ec:0b:37:f7:2a:f9:a1:9e"
+      - git_config_user
+      - when:
+          condition: << parameters.alpha >>
+          steps:
+            - run:
+                name: Bump changed packages alpha version
+                command: npx lerna version --conventional-prerelease  --no-commit-hooks --no-changelog --yes --no-push
+      - unless:
+          condition: << parameters.alpha >>
+          steps:
+            - run:
+                name: Bump changed packages official version
+                command: npx lerna version --conventional-commits --conventional-graduate --no-commit-hooks --yes --no-push
+      - persist_to_workspace:
+          root: ./
+          paths:
+            - packages/*/package.json
+            - .git
+  # Lerna specific
+  push_version_bump:
+    parameters:
+      alpha:
+        type: boolean
+        default: false
+    working_directory: ~/project
+    executor: node
+    steps:
+      - checkout
+      - attach_workspace:
+          at: ~/project
+      - add_ssh_keys:
+          fingerprints:
+            - "fe:62:c3:74:21:1f:73:a0:ec:0b:37:f7:2a:f9:a1:9e"
+      - git_config_user
+      - when:
+          condition: << parameters.alpha >>
+          steps:
+            - run:
+                name: Push package versions to github without tag
+                command: |
+                  git pull
+                  TAGS=$(git log -n 1 | grep -Eo "\@newskit-render/.*" || true)
+                  git push --no-verify;
+      - unless:
+          condition: << parameters.alpha >>
+          steps:
+            - run:
+                name: Push package versions to github
+                command: |
+                  git pull
+                  TAGS=$(git log -n 1 | grep -Eo "\@newskit-render/.*" || true)
+                  git push --no-verify;
+                  for tag in $TAGS; do
+                    git push origin $tag --no-verify;
+                  done
+
+  create_version_file:
+    working_directory: ~/project
+    executor: node
+    steps:
+      - checkout
+      - attach_workspace:
+          at: ~/project
+      - get_correct_package
+      - run:
+          name: Create version.json
+          command: |
+            source $BASH_ENV
+            cd packages/$PACKAGE
+
+            CURRENT_VERSION=$(jq -r .version ./package.json)
+
+            # Required if your tags are prefixed (i.e. lerna)
+            TAG_FILTER="@newskit-render/$PACKAGE@"
+
+            FULL_CURRENT_VERSION=$TAG_FILTER$CURRENT_VERSION
+
+            cd ../..
+
+            echo "Creating version.json file for $FULL_CURRENT_VERSION ."
+
+            jq --null-input \
+              --arg tagFilter "$TAG_FILTER" \
+              --arg currentVersion "$CURRENT_VERSION" \
+              '[{"package":$tagFilter, "release":"\($tagFilter)_github_release", "change_request":"\($tagFilter)_change_request", "version":"\($tagFilter)\($currentVersion)"}]' > version.json
+            cat version.json
+      - persist_to_workspace:
+          root: ./
+          paths:
+            - version.json
+
+  create_and_promote_release:
+    executor: release-api/release-api-client
+    steps:
+      - attach_workspace:
+          at: ./
+      - release-api/dependencies
+      - release-api/health
+      - release-api/encrypt-github-token:
+          gitHubToken: GIT_ACCESS_TOKEN
+          gitHubTokenEncryptionKey: GIT_TOKEN_ENCRYPTION_KEY
+      - release-api/new-release
+      - release-api/change-request:
+          user_email: newskit-render@news.co.uk
+          description: ""
+          short_description: "performance improvements, feature enhancements and bug fixes"
+      - release-api/update-release
+      - release-api/promote-release
+      - release-api/release-sheet:
+          gitHubToken: GIT_ACCESS_TOKEN
+          platform: "Web"
+          title: "NewsKit Render"
+          business_justification: "This release is to deliver performance improvements, feature enhancements and bug fixes for NewsKit Render"
+          testing_tools: "Jest, Cypress"
+          os_type: "EKS"
+          email: "newskit-render@news.co.uk"
+          product_owner: "Joe Cooke"
+          priority: "P1"
+          testing_method: "Unit, E2E"
+          partner: "Internal NewsUK team"
+
+  promote_release_on_slack:
+    executor: node
+    working_directory: ~/project
+    steps:
+      - checkout
+      - attach_workspace:
+          at: ~/project
+      - get_correct_package
+      - run:
+          name: build release message and pick webhook
+          command: |
+            source $BASH_ENV
+            cd packages/$PACKAGE
+            export CURRENT_VERSION=$(jq -r .version ./package.json)
+            echo "export CURRENT_VERSION=$CURRENT_VERSION" >> $BASH_ENV
+            TAG_FILTER="@newskit-render/$PACKAGE@"
+            ../../custom-release-slack-message-builder.sh @newskit-render $PACKAGE $CURRENT_VERSION
+            if [ "$PACKAGE" = "create-render-app" ] || [ "$PACKAGE" = "core" ]; then
+              echo "export PROMOTE_RELEASE_WEBHOOK=$SLACK_RELEASES_WEBHOOK" >> $BASH_ENV
+            else
+              echo "export PROMOTE_RELEASE_WEBHOOK=$SLACK_DEPENDENCY_WEBHOOK" >> $BASH_ENV
+            fi
+      - slack/notify:
+          color: "#42e2f4"
+          message: "$CUSTOM_SLACK_MESSAGE"
+          webhook: ${PROMOTE_RELEASE_WEBHOOK}
+
+  merge_warning:
+    executor: node
+    working_directory: ~/project
+    steps:
+      - checkout
+      - attach_workspace:
+          at: ~/project
+      - run:
+          name: create merge message
+          command: |
+            ./custom-merge-message-builder.sh
+      - slack/notify:
+          color: "#D61A1F"
+          message: "Alert Render Devs \n ${CUSTOM_MERGE_MESSAGE} has triggered Build workflow. Please don't merge until Build has finished."
+          webhook: ${SLACK_MERGE_WARNING_WEBHOOK}
+
+  merge_complete:
+    executor: node
+    working_directory: ~/project
+    steps:
+      - checkout
+      - attach_workspace:
+          at: ~/project
+      - slack/notify:
+          color: "#00FF00"
+          message: "Alert Render Devs, \n Build workflow is complete OK to merge."
+          webhook: ${SLACK_MERGE_WARNING_WEBHOOK}
+
+  add_github_comment:
+    executor: node
+    steps:
+      - run:
+          name: Post a comment to GitHub
+          command: |
+            PR_RESPONSE=$(curl --location --request GET "https://api.github.com/repos/$CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME/pulls?head=$CIRCLE_PROJECT_USERNAME:$CIRCLE_BRANCH&state=open" \
+            -u $GIT_USERNAME:$GIT_ACCESS_TOKEN)
+            if [ $(echo $PR_RESPONSE | jq length) -eq 0 ]; then
+              echo "No PR found to update"
+            else
+              PR_COMMENT_URL=$(echo $PR_RESPONSE | jq -r ".[]._links.comments.href")
+              PR_NUMBER=$(echo ${CIRCLE_PULL_REQUEST##*/})
+            fi
+            curl --location --request POST "$PR_COMMENT_URL" \
+            -u $GIT_USERNAME:$GIT_ACCESS_TOKEN \
+            --header 'Content-Type: application/json' \
+            --data-raw '{
+             "body": "This PR has been automatically deployed [here]('https://pr-${PR_NUMBER}-newskit-render.ceng-dev.newsuk.tech')."
+            }'
+  visual_regression_test:
+    working_directory: ~/project
+    parameters:
+      package_list:
+        description: project environments
+        default: "my-account shared-components"
+        type: string
+      package:
+        type: string
+    executor: node
+    steps:
+      - checkout
+      - attach_workspace:
+          at: ~/project
+      - should_run_multi:
+          package_list: << parameters.package_list >>
+      - run:
+          name: "Setup Applitools environment variables"
+          <<: *applitools_defaults
+      - restore_cache:
+          keys:
+            - yarn-cache-key-{{ .Environment.BUILD_CACHE_VERSION }}-{{ checksum "yarn.lock" }}-{{ checksum "combined-package-lock.txt" }}
+      - restore_cache:
+          keys:
+            - yarn-cache-key-{{ .Environment.BUILD_CACHE_VERSION }}-myaccount-{{ checksum "yarn.lock" }}-{{ checksum "combined-package-lock.txt" }}
+      - restore_cache:
+          keys:
+            - cypress-cache-key-{{ .Environment.CYPRESS_CACHE_VERSION }}-{{ checksum "yarn.lock" }}-{{ checksum "combined-package-lock.txt" }}
+      - run:
+          name: "Export Newskit API variables"
+          <<: *newskit_api_defaults
+      - run:
+          name: "install cypress dependencies"
+          command: |
+            sudo apt-get update
+            sudo apt-get install libgtk2.0-0 libgtk-3-0 libgbm-dev libnotify-dev libgconf-2-4 libnss3 libxss1 libasound2 libxtst6 xauth xvfb
+      - browser-tools/install-chrome
+      - browser-tools/install-chromedriver
+      - run:
+          name: Check chrome install
+          command: |
+            google-chrome --version
+            chromedriver --version
+      - run:
+          name: "start server"
+          command: |
+            cd packages/core
+            yarn start:test:server
+          background: true
+      - run:
+          name: "Wait test server"
+          command: |
+            cd packages/core
+            yarn wait:server
+      - run:
+          name: "Run visual tests"
+          no_output_timeout: 30m
+          command: |
+            cd packages/<< parameters.package >>
+            yarn cy:vis
+      - run:
+          name: "Clean up test user accounts"
+          command: |
+            cd scripts
+            . ./remove-user.sh
+
+  slack_deploy_approval:
+    parameters:
+      approval:
+        type: boolean
+        default: false
+      version:
+        type: string
+        default: ${CIRCLE_TAG}
+      environment:
+        type: string
+    executor: node
+    steps:
+      - checkout
+      - attach_workspace:
+          at: ~/project
+      - when:
+          condition: << parameters.approval >>
+          steps:
+            - slack/approval:
+                message: 'Deployment of << parameters.version >> to << parameters.environment >> requires approval'
+                webhook: ${SLACK_SOLUTIONS_CIRCLECI_DEPLOYMENTS_WEBHOOK}
+                color: '#32a852'
+      - unless:
+          condition: << parameters.approval >>
+          steps:
+            - slack/approval:
+                message: '<< parameters.version >> is being deployed to << parameters.environment >>'
+                webhook: ${SLACK_SOLUTIONS_CIRCLECI_DEPLOYMENTS_WEBHOOK}
+                color: '#32a852'
+
+  trigger_workflow_by_workspace:
+    parameters:
+      workflow:
+        type: string
+      package:
+        type: string
+        default: tag
+    executor: node
+    steps:
+      - checkout
+      - attach_workspace:
+          at: ~/project
+      - run:
+          name: Get correct package
+          command: |
+            if [ -n "$CIRCLE_TAG" ]; then
+              PACKAGE=$(echo "$CIRCLE_TAG" | grep -oE '/.*@' | grep -oE '[a-z|-]+')
+              echo "export PACKAGE=$PACKAGE" >> $BASH_ENV
+            else
+              echo "export PACKAGE=<< parameters.package >>" >> $BASH_ENV
+            fi
+      - run:
+          command: cat packages/${PACKAGE}/package.json | jq -r .version
+      - run:
+          name: Trigger << parameters.workflow >>
+          command: |
+            set -x
+            VERSION=@newskit-render/${PACKAGE}@$(cat packages/${PACKAGE}/package.json | jq -r .version)
+            .ci/trigger-circleci-workflow.sh << parameters.workflow >> $VERSION
+
+  trigger_workflow_by_circle_tag:
+    parameters:
+      workflow:
+        type: string
+    executor: node
+    steps:
+      - checkout
+      - run:
+          name: Trigger << parameters.workflow >>
+          command: |
+            .ci/trigger-circleci-workflow.sh << parameters.workflow >> $CIRCLE_TAG
+
+# Optional filters assuming trunk based development
+## For PR workflow
+only_on_pr_branch: &only_on_pr_branch
+  filters:
+    branches:
+      ignore:
+        - master
+        - develop
+## For master workflow
+only_on_master_branch: &only_on_master_branch
+  filters:
+    branches:
+      only: master
+## Triggering core deploy and publish
+only_on_k8s_tag: &only_on_k8s_tag
+  filters:
+    tags:
+      only: /^@newskit-render\/(core|mock)+@[\d.]+$/
+    branches:
+      ignore: /.*/
+## Not required for core, publishing packages to npm
+only_on_publish_package: &only_on_publish_package
+  filters:
+    tags:
+      only: /^@newskit-render/(create-render-app|auth|feed|my-account|validation|shared-components|standalone-components|feature-flags|checkout|api)+@[\d.]+$/
+    branches:
+      ignore: /.*/
+
+## Triggering monitoring
+only_on_monitor_tag: &only_on_monitor_tag
+  filters:
+    tags:
+      only: /^@newskit-render/infrastructure-newrelic.*/
+    branches:
+      ignore: /.*/
+## Template for require job
+require_bootstrap: &require_bootstrap
+  requires:
+    - install_deps
+
+require_check_changes: &require_check_changes
+  requires:
+    - check_changes
+
+workflows:
+  pull_request:
+    jobs:
+      - pact_can_i_deploy:
+          <<: *only_on_pr_branch
+          context: ncu-newskit-render-dev
+          name: pact_can_i_deploy
+      - check_changes:
+          <<: *only_on_pr_branch
+          name: check_changes
+          requires:
+            - pact_can_i_deploy
+
+      - install_deps:
+          context: ncu-newskit-render-dev
+          name: install_deps
+          <<: *only_on_pr_branch
+          requires:
+            - check_changes
+
+      - lint:
+          <<: *only_on_pr_branch
+          context: ncu-newskit-render-dev
+          name: lint
+          <<: *require_bootstrap
+      - unit_tests:
+          <<: *only_on_pr_branch
+          context: ncu-newskit-render-dev
+          name: unit_tests
+          <<: *require_bootstrap
+      - pact_tests:
+          <<: *only_on_pr_branch
+          context: ncu-newskit-render-dev
+          name: pact_tests
+          <<: *require_bootstrap
+      # Core
+      - e2e_test:
+          <<: *only_on_pr_branch
+          context: ncu-newskit-render-dev
+          name: e2e_test
+          matrix:
+            parameters:
+              package: [core]
+          <<: *require_bootstrap
+      # Core
+      - init_aws:
+          <<: *only_on_pr_branch
+          context: ncu-newskit-render-dev
+          name: init_aws_eks_pr
+          job_type: "eks_pr"
+      # Core
+      - init_aws:
+          <<: *only_on_pr_branch
+          context: ncu-newskit-render-dev
+          name: init_aws_newskit_render
+          aws_access_key_id: ${ECR_AWS_ACCESS_KEY_ID}
+          aws_secret_key: ${ECR_AWS_SECRET_ACCESS_KEY}
+          aws_assume_role_arn: ${ECR_AWS_ASSUME_ROLE_ARN}
+          update_kubeconfig: false
+          requires:
+            - lint
+            - unit_tests
+            # - pact_tests
+            # - e2e_test
+      # Core
+      - deploy_terraform:
+          <<: *only_on_pr_branch
+          context: ncu-newskit-render-dev
+          name: deploy_terraform_<< matrix.package >>
+          matrix:
+            parameters:
+              package: [infrastructure-ecr, infrastructure-newrelic]
+          project: "newskit-render"
+          scope: "@newskit-render"
+          environment: dev
+          apply: false
+          requires:
+            - init_aws_newskit_render
+      # Core
+      - publish_docker:
+          <<: *only_on_pr_branch
+          context: ncu-newskit-render-dev
+          name: publish_docker_<< matrix.package >>
+          matrix:
+            parameters:
+              package: [core, mock]
+          requires:
+            - init_aws_newskit_render
+      # Core
+      - upgrade_helm:
+          <<: *only_on_pr_branch
+          context: ncu-newskit-render-dev
+          name: deploy_<< matrix.package >>_to_pr
+          matrix:
+            parameters:
+              package: ["core", "mock"]
+          create: true
+          environment: pr
+          node_env: development
+          requires:
+            - init_aws_eks_pr
+            - publish_docker_<< matrix.package >>
+
+      - add_github_comment:
+          <<: *only_on_pr_branch
+          context: ncu-newskit-render-prod
+          requires:
+            - deploy_core_to_pr
+
+      - visual_regression_test:
+          <<: *only_on_pr_branch
+          context: ncu-newskit-render-dev
+          name: visual_regression_test
+          package_list: "my-account shared-components"
+          package: "core"
+          requires:
+            - add_github_comment
+  # Core
+  remove_pr:
+    when:
+      not:
+        equal: [scheduled_pipeline, << pipeline.trigger_source >>]
+    jobs:
+      - init_aws:
+          <<: *only_on_master_branch
+          context: ncu-newskit-render-dev
+          name: init_aws_eks_pr
+          job_type: "eks_pr"
+      - uninstall_helm:
+          <<: *only_on_master_branch
+          context: ncu-newskit-render-dev
+          name: destroy_pr
+          environment: pr
+          matrix:
+            parameters:
+              package: [core, mock]
+          requires:
+            - init_aws_eks_pr
+  # Core
+  build:
+    when:
+      not:
+        equal: [scheduled_pipeline, << pipeline.trigger_source >>]
+    jobs:
+      # General - should be in core
+      - merge_warning:
+          name: merge_warning
+          context: ncu-newskit-render-prod
+          <<: *only_on_master_branch
+      - install_deps:
+          name: install_deps
+          context: ncu-newskit-render-dev
+          <<: *only_on_master_branch
+          requires:
+            # - pact_can_i_deploy
+            - merge_warning
+      # General - should be in core
+      - check_changes:
+          <<: *only_on_master_branch
+          name: check_changes
+      - pact_can_i_deploy:
+          <<: *only_on_master_branch
+          name: pact_can_i_deploy
+          context: ncu-newskit-render-dev
+      # Lerna specific
+      - bump_version:
+          <<: *only_on_master_branch
+          context: ncu-newskit-render-dev
+          name: bump_version_alpha
+          alpha: true
+          requires:
+            - install_deps
+            - check_changes
+      - publish_package_to_npm:
+          <<: *only_on_master_branch
+          name: publish_dependency_package_<< matrix.package >>_alpha
+          context: ncu-newskit-render-prod
+          alpha: true
+          matrix:
+            alias: publish_dependency_package_alpha
+            parameters:
+              package:
+                [
+                  api,
+                  auth,
+                  core,
+                  checkout,
+                  feed,
+                  feature-flags,
+                  my-account,
+                  shared-components,
+                  standalone-components,
+                  validation,
+                  mock,
+                  create-render-app,
+                ]
+          requires:
+            - bump_version_alpha
+      # Lerna specific
+      - push_version_bump:
+          <<: *only_on_master_branch
+          context: ncu-newskit-render-dev
+          alpha: true
+          requires:
+            - publish_dependency_package_alpha
+
+      # Not required for core
+      - create_render_app_build_test:
+          context: ncu-newskit-render-dev
+          <<: *only_on_master_branch
+          requires:
+            - push_version_bump
+
+      - init_aws:
+          <<: *only_on_master_branch
+          context: ncu-newskit-render-dev
+          name: init_aws_newskit_render_official
+          aws_access_key_id: ${ECR_AWS_ACCESS_KEY_ID}
+          aws_secret_key: ${ECR_AWS_SECRET_ACCESS_KEY}
+          aws_assume_role_arn: ${ECR_AWS_ASSUME_ROLE_ARN}
+          update_kubeconfig: false
+          requires:
+            - create_render_app_build_test
+
+      - deploy_terraform:
+          <<: *only_on_master_branch
+          context: ncu-newskit-render-dev
+          name: deploy_terraform_ecr_official
+          project: "newskit-render"
+          package: "infrastructure-ecr"
+          scope: "@newskit-render"
+          environment: dev
+          apply: true
+          requires:
+            - init_aws_newskit_render_official
+      - bump_version:
+          <<: *only_on_master_branch
+          name: bump_official_version
+          context: ncu-newskit-render-dev
+          requires:
+            - create_render_app_build_test
+
+      - publish_package_to_npm:
+          <<: *only_on_master_branch
+          name: publish_dependency_package_<< matrix.package >>
+          context: ncu-newskit-render-prod
+          matrix:
+            alias: publish_dependency_package_official
+            parameters:
+              package:
+                [
+                  api,
+                  auth,
+                  core,
+                  checkout,
+                  feed,
+                  feature-flags,
+                  my-account,
+                  shared-components,
+                  standalone-components,
+                  validation,
+                  mock,
+                  create-render-app,
+                ]
+          requires:
+            - bump_official_version
+
+              # Core
+      - publish_docker:
+          <<: *only_on_master_branch
+          name: publish_docker_<< matrix.package >>
+          context: ncu-newskit-render-dev
+          matrix:
+            alias: publish_docker_packages_official
+            parameters:
+              package: [core, mock]
+          requires:
+            - publish_dependency_package_official
+            - init_aws_newskit_render_official
+            - deploy_terraform_ecr_official
+      # Lerna specific
+      - push_version_bump:
+          <<: *only_on_master_branch
+          name: push_version_bump_official
+          context: ncu-newskit-render-dev
+          requires:
+            - publish_docker_packages_official
+
+      - merge_complete:
+          <<: *only_on_master_branch
+          name: merge_complete
+          context: ncu-newskit-render-prod
+          requires:
+            - push_version_bump_official
+
+  # Core
+  deploy_publish_core:
+    when: << pipeline.parameters.run_build_workflow >>
+    jobs:
+      - create_version_file:
+          <<: *only_on_k8s_tag
+          context: ncu-newskit-render-prod
+      - create_and_promote_release:
+          <<: *only_on_k8s_tag
+          context: ncu-newskit-render-prod
+          requires:
+            - create_version_file
+      - promote_release_on_slack:
+          <<: *only_on_k8s_tag
+          context: ncu-newskit-render-prod
+          requires:
+            - create_and_promote_release
+      - trigger_workflow_by_workspace:
+          <<: *only_on_k8s_tag
+          context: ncu-newskit-render-dev
+          name: trigger_deploy_to_dev_workflow
+          workflow: deploy_to_dev_workflow
+
+  deploy_to_dev_workflow:
+    when: << pipeline.parameters.run_deploy_to_dev_workflow >>
+    jobs:
+      - slack_deploy_approval:
+          <<: *only_on_k8s_tag
+          context: ncu-newskit-render-dev
+          approval: false
+          environment: DEV
+      - init_aws:
+          <<: *only_on_k8s_tag
+          context: ncu-newskit-render-dev
+          name: init_aws_newskit_render
+          aws_access_key_id: ${ECR_AWS_ACCESS_KEY_ID}
+          aws_secret_key: ${ECR_AWS_SECRET_ACCESS_KEY}
+          aws_assume_role_arn: ${ECR_AWS_ASSUME_ROLE_ARN}
+          update_kubeconfig: false
+      - init_aws:
+          <<: *only_on_k8s_tag
+          context: ncu-newskit-render-dev
+          name: init_aws_eks_dev
+          job_type: "eks_dev"
+      - upgrade_helm:
+          <<: *only_on_k8s_tag
+          context: ncu-newskit-render-dev
+          name: deploy_packages_to_dev
+          create: true
+          environment: dev
+          node_env: development
+          requires:
+            - init_aws_eks_dev
+            - init_aws_newskit_render
+      - trigger_workflow_by_circle_tag:
+          <<: *only_on_k8s_tag
+          context: ncu-newskit-render-dev
+          name: trigger_deploy_to_staging_workflow
+          workflow: deploy_to_staging_workflow
+          requires:
+            - deploy_packages_to_dev
+
+  deploy_to_staging_workflow:
+    when: << pipeline.parameters.run_deploy_to_staging_workflow >>
+    jobs:
+      - slack_deploy_approval:
+          <<: *only_on_k8s_tag
+          context: ncu-newskit-render-dev
+          approval: true
+          environment: STAGING
+      - approve_deploy_to_staging:
+          <<: *only_on_k8s_tag
+          type: approval
+      - init_aws:
+          <<: *only_on_k8s_tag
+          context: ncu-newskit-render-dev
+          name: init_aws_newskit_render_staging
+          aws_access_key_id: ${ECR_AWS_ACCESS_KEY_ID}
+          aws_secret_key: ${ECR_AWS_SECRET_ACCESS_KEY}
+          aws_assume_role_arn: ${ECR_AWS_ASSUME_ROLE_ARN}
+          update_kubeconfig: false
+          requires:
+            - approve_deploy_to_staging
+      - init_aws:
+          <<: *only_on_k8s_tag
+          name: init_aws_eks_staging
+          context: ncu-newskit-render-stage
+          job_type: "eks_staging"
+          requires:
+            - init_aws_newskit_render_staging
+      - upgrade_helm:
+          <<: *only_on_k8s_tag
+          name: deploy_packages_to_staging
+          context: ncu-newskit-render-stage
+          environment: staging
+          requires:
+            - init_aws_eks_staging
+      - trigger_workflow_by_circle_tag:
+          <<: *only_on_k8s_tag
+          context: ncu-newskit-render-dev
+          name: trigger_deploy_to_prod_workflow
+          workflow: deploy_to_prod_workflow
+          requires:
+            - deploy_packages_to_staging
+  
+  deploy_to_prod_workflow:
+    when: << pipeline.parameters.run_deploy_to_prod_workflow >>
+    jobs:
+      - slack_deploy_approval:
+          <<: *only_on_k8s_tag
+          context: ncu-newskit-render-dev
+          approval: true
+          environment: PROD
+      - approve_deploy_to_prod:
+          <<: *only_on_k8s_tag
+          type: approval
+      - init_aws:
+          <<: *only_on_k8s_tag
+          context: ncu-newskit-render-dev
+          name: init_aws_newskit_render_prod
+          aws_access_key_id: ${ECR_AWS_ACCESS_KEY_ID}
+          aws_secret_key: ${ECR_AWS_SECRET_ACCESS_KEY}
+          aws_assume_role_arn: ${ECR_AWS_ASSUME_ROLE_ARN}
+          update_kubeconfig: false
+          requires:
+            - approve_deploy_to_prod
+      - init_aws:
+          <<: *only_on_k8s_tag
+          name: init_aws_eks_prod
+          context: ncu-newskit-render-prod
+          job_type: "eks_prod"
+          requires:
+            - init_aws_newskit_render_prod
+      - upgrade_helm:
+          <<: *only_on_k8s_tag
+          name: deploy_packages_to_prod
+          context: ncu-newskit-render-prod
+          environment: prod
+          requires:
+            - init_aws_eks_prod
+  # Not required for core
+
+  create_and_promote_release:
+    jobs:
+      - create_version_file:
+          <<: *only_on_publish_package
+          context: ncu-newskit-render-prod
+      - create_and_promote_release:
+          <<: *only_on_publish_package
+          context: ncu-newskit-render-prod
+          requires:
+            - create_version_file
+      - promote_release_on_slack:
+          <<: *only_on_publish_package
+          context: ncu-newskit-render-prod
+          requires:
+            - create_and_promote_release
+
+  deploy_monitoring:
+    jobs:
+      - approve_monitoring_dev:
+          <<: *only_on_monitor_tag
+          type: approval
+      - init_aws:
+          <<: *only_on_monitor_tag
+          context: ncu-newskit-render-dev
+          name: init_aws_newskit_render_dev
+          aws_access_key_id: ${ECR_AWS_ACCESS_KEY_ID}
+          aws_secret_key: ${ECR_AWS_SECRET_ACCESS_KEY}
+          aws_assume_role_arn: ${ECR_AWS_ASSUME_ROLE_ARN}
+          update_kubeconfig: false
+          requires:
+            - approve_monitoring_dev
+      - deploy_terraform:
+          <<: *only_on_monitor_tag
+          context: ncu-newskit-render-dev
+          name: deploy_terraform_newrelic_dev
+          project: "newskit-render"
+          package: "infrastructure-newrelic"
+          scope: "@newskit-render"
+          environment: dev
+          apply: true
+          requires:
+            - init_aws_newskit_render_dev
+      - approve_monitoring_staging:
+          <<: *only_on_monitor_tag
+          type: approval
+          requires:
+            - deploy_terraform_newrelic_dev
+      - init_aws:
+          <<: *only_on_monitor_tag
+          context: ncu-newskit-render-dev
+          name: init_aws_newskit_render_staging
+          aws_access_key_id: ${ECR_AWS_ACCESS_KEY_ID}
+          aws_secret_key: ${ECR_AWS_SECRET_ACCESS_KEY}
+          aws_assume_role_arn: ${ECR_AWS_ASSUME_ROLE_ARN}
+          update_kubeconfig: false
+          requires:
+            - approve_monitoring_staging
+      - deploy_terraform:
+          <<: *only_on_monitor_tag
+          context: ncu-newskit-render-stage
+          name: deploy_terraform_newrelic_staging
+          project: "newskit-render"
+          package: "infrastructure-newrelic"
+          scope: "@newskit-render"
+          environment: staging
+          apply: true
+          requires:
+            - init_aws_newskit_render_staging
+      - approve_monitoring_prod:
+          <<: *only_on_monitor_tag
+          type: approval
+          requires:
+            - deploy_terraform_newrelic_staging
+      - init_aws:
+          <<: *only_on_monitor_tag
+          context: ncu-newskit-render-dev
+          name: init_aws_newskit_render_prod
+          aws_access_key_id: ${ECR_AWS_ACCESS_KEY_ID}
+          aws_secret_key: ${ECR_AWS_SECRET_ACCESS_KEY}
+          aws_assume_role_arn: ${ECR_AWS_ASSUME_ROLE_ARN}
+          update_kubeconfig: false
+          requires:
+            - approve_monitoring_prod
+      - deploy_terraform:
+          <<: *only_on_monitor_tag
+          context: ncu-newskit-render-prod
+          name: deploy_terraform_newrelic_prod
+          project: "newskit-render"
+          package: "infrastructure-newrelic"
+          scope: "@newskit-render"
+          environment: prod
+          apply: true
+          requires:
+            - init_aws_newskit_render_prod
+
+  remove_old_environments:
+    when:
+      and:
+        - equal: [scheduled_pipeline, << pipeline.trigger_source >>]
+        - equal: ["remove_old_environments", << pipeline.schedule.name >>]
+    jobs:
+      - remove_all_pr_environments
